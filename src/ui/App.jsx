@@ -19,15 +19,75 @@ const queryClient = new QueryClient({
 const PROVIDERS = ["giphy", "tenor", "klipy"];
 const PROVIDER_NAMES = { giphy: "GIPHY", tenor: "Tenor", klipy: "KLIPY" };
 const LOCALES = [
+  ["sq_AL", "Albanian · Albania"],
+  ["ar_EG", "Arabic · Egypt"],
+  ["ar_SA", "Arabic · Saudi Arabia"],
+  ["be_BY", "Belarusian · Belarus"],
+  ["bn_BD", "Bengali · Bangladesh"],
+  ["bs_BA", "Bosnian · Bosnia and Herzegovina"],
+  ["zh_HK", "Cantonese · Hong Kong"],
+  ["ca_ES", "Catalan · Spain"],
+  ["zh_CN", "Chinese (Simplified) · China"],
+  ["zh_TW", "Chinese (Traditional) · Taiwan"],
+  ["hr_HR", "Croatian · Croatia"],
+  ["cs_CZ", "Czech · Czechia"],
+  ["da_DK", "Danish · Denmark"],
+  ["nl_NL", "Dutch · Netherlands"],
   ["en_US", "English · United States"],
   ["en_GB", "English · United Kingdom"],
-  ["es_ES", "Español · España"],
-  ["es_MX", "Español · México"],
-  ["fr_FR", "Français · France"],
-  ["de_DE", "Deutsch · Deutschland"],
-  ["pt_BR", "Português · Brasil"],
-  ["ja_JP", "日本語 · 日本"],
+  ["en_CA", "English · Canada"],
+  ["en_AU", "English · Australia"],
+  ["en_IN", "English · India"],
+  ["en_IE", "English · Ireland"],
+  ["en_NZ", "English · New Zealand"],
+  ["en_ZA", "English · South Africa"],
+  ["fa_IR", "Farsi · Iran"],
+  ["fi_FI", "Finnish · Finland"],
+  ["fr_FR", "French · France"],
+  ["fr_BE", "French · Belgium"],
+  ["fr_CA", "French · Canada"],
+  ["fr_CH", "French · Switzerland"],
+  ["de_DE", "German · Germany"],
+  ["de_AT", "German · Austria"],
+  ["de_CH", "German · Switzerland"],
+  ["el_GR", "Greek · Greece"],
+  ["he_IL", "Hebrew · Israel"],
+  ["hi_IN", "Hindi · India"],
+  ["hu_HU", "Hungarian · Hungary"],
+  ["id_ID", "Indonesian · Indonesia"],
+  ["it_IT", "Italian · Italy"],
+  ["ja_JP", "Japanese · Japan"],
+  ["ko_KR", "Korean · South Korea"],
+  ["lo_LA", "Lao · Laos"],
+  ["ms_MY", "Malay · Malaysia"],
+  ["mn_MN", "Mongolian · Mongolia"],
+  ["no_NO", "Norwegian Bokmål · Norway"],
+  ["nn_NO", "Norwegian Nynorsk · Norway"],
+  ["pl_PL", "Polish · Poland"],
+  ["pt_BR", "Portuguese · Brazil"],
+  ["pt_PT", "Portuguese · Portugal"],
+  ["ro_RO", "Romanian · Romania"],
+  ["ru_RU", "Russian · Russia"],
+  ["sr_RS", "Serbian · Serbia"],
+  ["sk_SK", "Slovak · Slovakia"],
+  ["es_ES", "Spanish · Spain"],
+  ["es_MX", "Spanish · Mexico"],
+  ["es_AR", "Spanish · Argentina"],
+  ["es_CO", "Spanish · Colombia"],
+  ["es_US", "Spanish · United States"],
+  ["sv_SE", "Swedish · Sweden"],
+  ["tl_PH", "Filipino/Tagalog · Philippines"],
+  ["th_TH", "Thai · Thailand"],
+  ["tr_TR", "Turkish · Türkiye"],
+  ["uk_UA", "Ukrainian · Ukraine"],
+  ["ur_PK", "Urdu · Pakistan"],
+  ["vi_VN", "Vietnamese · Vietnam"],
 ];
+const GIPHY_LANGUAGES = new Set([
+  "ar", "bn", "cs", "da", "de", "en", "es", "fa", "fi", "fr",
+  "he", "hi", "hu", "id", "it", "ja", "ko", "ms", "nl", "no", "pl",
+  "pt", "ro", "ru", "sv", "th", "tl", "tr", "uk", "vi", "zh",
+]);
 const REACTIONS_BY_PROVIDER = {
   tenor: [
     "Good night", "Good morning", "Confused", "Chill out", "Love", "Happy",
@@ -93,6 +153,13 @@ function providerIsConfigured(provider) {
     return Boolean(PROVIDER_CONFIG.tenor.key && PROVIDER_CONFIG.tenor.clientKey);
   }
   return Boolean(PROVIDER_CONFIG.klipy.key);
+}
+
+function giphyLanguage(locale) {
+  const [language] = locale.split("_");
+  if (!GIPHY_LANGUAGES.has(language)) return "";
+  if (language === "zh") return locale === "zh_CN" ? "zh-CN" : "zh-TW";
+  return language;
 }
 
 function readPage() {
@@ -237,10 +304,14 @@ function makeRequest(provider, action, options) {
     if (action === "search") url.searchParams.set("q", q);
     if (action === "search" || action === "trending") {
       url.searchParams.set("rating", "g");
-      url.searchParams.set("lang", locale.split("_")[0]);
+      const language = giphyLanguage(locale);
+      if (language) url.searchParams.set("lang", language);
       if (locale.includes("_")) url.searchParams.set("country_code", locale.split("_")[1]);
     }
-    if (action === "categories") url.searchParams.set("lang", locale.split("_")[0]);
+    if (action === "categories") {
+      const language = giphyLanguage(locale);
+      if (language) url.searchParams.set("lang", language);
+    }
     return { url };
   }
 
@@ -261,6 +332,7 @@ function makeRequest(provider, action, options) {
     url.searchParams.set("key", PROVIDER_CONFIG.tenor.key);
     url.searchParams.set("client_key", PROVIDER_CONFIG.tenor.clientKey);
     url.searchParams.set("locale", locale);
+    if (locale.includes("_")) url.searchParams.set("country", locale.split("_")[1]);
     url.searchParams.set("limit", String(limit));
     url.searchParams.set("contentfilter", "medium");
     if (action === "search") {

@@ -25,6 +25,12 @@ reactions without one, it lazily searches that provider for a single preview
 when the tile scrolls into view; TanStack Query caches fetched previews during
 the session.
 
+The language/region selector includes Tenor's documented search languages and
+common regional variants. Tenor receives both `locale` and `country`; KLIPY
+receives the combined locale. GIPHY receives its documented `lang` values and
+the selected country where supported; for languages outside GIPHY's supported
+list, the `lang` parameter is omitted rather than sending an unsupported code.
+
 ## Important: no hosted REST API
 
 This static site previews logical paths such as `/api/media/search`, but those
