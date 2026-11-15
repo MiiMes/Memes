@@ -82,11 +82,11 @@ export function MediaCard({
   async function copyResult() {
     showCopyFeedback({ tone: "pending", message: "Copying…" });
     try {
-      const result = await copyMediaToClipboard(item);
+      await copyMediaToClipboard(item);
       const mediaName = item.kind === "sticker" ? "Sticker" : "GIF";
       showCopyFeedback({
         tone: "success",
-        message: result === "media" ? `${mediaName} copied!` : `${mediaName} link copied!`,
+        message: `${mediaName} copied!`,
       });
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
