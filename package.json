@@ -12,8 +12,7 @@
     "@tanstack/react-query": "^5.62.7",
     "@tanstack/react-query-devtools": "^5.62.7",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "upng-js": "^2.1.0"
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",
