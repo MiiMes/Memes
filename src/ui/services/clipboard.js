@@ -128,6 +128,28 @@ function createClipboardLogger(item, mediaUrl, mimeType) {
   };
 }
 
+export async function copyAnimatedGifToClipboard(blob) {
+  if (!blob || blob.type !== "image/gif") {
+    throw new Error("The generated meme is not an animated GIF.");
+  }
+
+  const clipboard = globalThis.navigator?.clipboard;
+  const ClipboardItemConstructor = globalThis.ClipboardItem;
+  if (typeof clipboard?.write !== "function" ||
+    typeof ClipboardItemConstructor !== "function") {
+    throw new Error("This browser does not support copying animated GIFs to the clipboard.");
+  }
+
+  try {
+    await clipboard.write([
+      new ClipboardItemConstructor({ "image/gif": blob }),
+    ]);
+  } catch (cause) {
+    const detail = cause instanceof Error ? ` ${cause.message}` : "";
+    throw new Error(`This browser rejected animated GIF clipboard data.${detail}`, { cause });
+  }
+}
+
 export async function copyMediaToClipboard(item) {
   const mediaUrl = item.imageUrl;
   if (!mediaUrl) throw new Error("This result has no media URL to copy.");

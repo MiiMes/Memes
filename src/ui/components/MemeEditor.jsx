@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { copyAnimatedGifToClipboard } from "../services/clipboard.js";
 import { createCaptionedGif } from "../services/memeEditor.js";
 
 export function MemeEditor({ item, onClose }) {
@@ -6,8 +7,11 @@ export function MemeEditor({ item, onClose }) {
   const [bottomText, setBottomText] = useState("");
   const [fontSizePercent, setFontSizePercent] = useState(8);
   const [isExporting, setIsExporting] = useState(false);
+  const [isCopying, setIsCopying] = useState(false);
   const [exportError, setExportError] = useState("");
+  const [copyFeedback, setCopyFeedback] = useState(null);
   const [outputUrl, setOutputUrl] = useState("");
+  const [outputBlob, setOutputBlob] = useState(null);
 
   useEffect(() => {
     if (!outputUrl) return undefined;
@@ -17,7 +21,9 @@ export function MemeEditor({ item, onClose }) {
   function updateCaption(setter, value) {
     setter(value);
     setOutputUrl("");
+    setOutputBlob(null);
     setExportError("");
+    setCopyFeedback(null);
   }
 
   async function createMeme(event) {
@@ -25,6 +31,8 @@ export function MemeEditor({ item, onClose }) {
     setIsExporting(true);
     setExportError("");
     setOutputUrl("");
+    setOutputBlob(null);
+    setCopyFeedback(null);
     try {
       const blob = await createCaptionedGif(item.imageUrl, {
         topText,
@@ -32,11 +40,30 @@ export function MemeEditor({ item, onClose }) {
         fontSizePercent,
       });
       setOutputUrl(URL.createObjectURL(blob));
+      setOutputBlob(blob);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       setExportError(message);
     } finally {
       setIsExporting(false);
+    }
+  }
+
+  async function copyMeme() {
+    if (!outputBlob) return;
+    setIsCopying(true);
+    setCopyFeedback(null);
+    try {
+      await copyAnimatedGifToClipboard(outputBlob);
+      setCopyFeedback({
+        tone: "success",
+        message: "Animated GIF copied. Paste it into your target app to check support.",
+      });
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setCopyFeedback({ tone: "error", message });
+    } finally {
+      setIsCopying(false);
     }
   }
 
@@ -106,7 +133,9 @@ export function MemeEditor({ item, onClose }) {
             onChange={(event) => {
               setFontSizePercent(Number(event.target.value));
               setOutputUrl("");
+              setOutputBlob(null);
               setExportError("");
+              setCopyFeedback(null);
             }}
             disabled={isExporting}
           />
@@ -116,12 +145,25 @@ export function MemeEditor({ item, onClose }) {
           <button className="meme-editor-primary" type="submit" disabled={isExporting}>
             {isExporting ? "Creating GIF…" : "Create animated GIF"}
           </button>
-          {outputUrl && (
-            <a className="meme-editor-download" href={outputUrl} download="meme.gif">
-              Download GIF <span aria-hidden="true">↓</span>
-            </a>
+          {outputBlob && (
+            <button
+              className="meme-editor-secondary"
+              type="button"
+              onClick={copyMeme}
+              disabled={isCopying}
+            >
+              {isCopying ? "Copying GIF…" : "Copy animated GIF"}
+            </button>
           )}
         </div>
+        {copyFeedback && (
+          <p
+            className={`meme-editor-copy-feedback ${copyFeedback.tone}`}
+            role={copyFeedback.tone === "error" ? "alert" : "status"}
+          >
+            {copyFeedback.message}
+          </p>
+        )}
       </form>
     </section>
   );

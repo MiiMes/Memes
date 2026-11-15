@@ -150,8 +150,12 @@ h1, h2, h3, p { margin-top: 0; }
 .meme-editor-actions { display: grid; gap: 10px; }
 .meme-editor-primary { min-height: 42px; border: 0; border-radius: 6px; color: #171718; background: var(--coral); font-size: 11px; font-weight: 700; }
 .meme-editor-primary:disabled { opacity: .6; cursor: wait; }
-.meme-editor-download { display: grid; min-height: 40px; place-items: center; border: 1px solid #e7e6e3; border-radius: 6px; color: #333; background: #f7f7f5; font-size: 11px; font-weight: 700; }
+.meme-editor-secondary { min-height: 40px; border: 1px solid #e7e6e3; border-radius: 6px; color: #333; background: #f7f7f5; font-size: 11px; font-weight: 700; }
+.meme-editor-secondary:disabled { opacity: .6; cursor: wait; }
 .meme-editor-error { margin: 0; color: #9a4036; font-size: 11px; }
+.meme-editor-copy-feedback { margin: 0; font-size: 11px; }
+.meme-editor-copy-feedback.error { color: #9a4036; }
+.meme-editor-copy-feedback.success { color: #277647; }
 .meme-editor-empty { display: grid; justify-items: center; gap: 14px; padding: 46px 20px; border: 1px solid #e8e7e5; border-radius: 10px; color: #77767a; background: white; font-size: 12px; }
 .meme-editor-empty p { margin: 0; }
 .meme-editor-secondary { padding: 9px 13px; border: 1px solid #e4e3e1; border-radius: 6px; color: #333; background: white; font-size: 11px; font-weight: 600; }
