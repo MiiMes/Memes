@@ -20,6 +20,20 @@ inspect raw provider JSON, and review request status, duration, result count,
 redacted endpoint URLs, and errors. TanStack Query Devtools are available in
 the app to inspect cache and query state.
 
+## Source organization
+
+- `src/ui/App.jsx` composes the app shell and page views.
+- `src/ui/components/` contains the shared and page-specific UI components.
+- `src/ui/hooks/` contains application state, provider queries, and hash routing.
+- `src/ui/services/` contains provider requests and debugging logs.
+- `src/ui/constants/` and `src/ui/utils/` hold shared configuration and pure helpers.
+
+The existing `#/`, `#/explore`, `#/reactions`, and `#/api` routes are preserved
+through `useHashRoute`; a routing dependency is unnecessary for these four
+static views. App-wide state is coordinated by `useAppController` and passed
+directly to the components that need it rather than introducing a global store
+or context for the current shallow component tree.
+
 The reactions page uses category-provided preview GIFs where available. For
 reactions without one, it lazily searches that provider for a single preview
 when the tile scrolls into view; TanStack Query caches fetched previews during
