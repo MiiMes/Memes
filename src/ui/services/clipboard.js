@@ -65,47 +65,6 @@ async function createStaticPng(gifBlob, logger) {
   }
 }
 
-function copyWithLegacyHtmlSelection(item) {
-  const documentApi = globalThis.document;
-  const selection = documentApi?.getSelection?.();
-  if (!documentApi?.body || !selection || typeof documentApi.execCommand !== "function") {
-    throw new Error("Legacy rich HTML copying is not available in this browser.");
-  }
-
-  const previousRanges = Array.from(
-    { length: selection.rangeCount },
-    (_, index) => selection.getRangeAt(index).cloneRange(),
-  );
-  const previouslyFocused = documentApi.activeElement;
-  const container = documentApi.createElement("div");
-  container.contentEditable = "true";
-  container.tabIndex = -1;
-  container.setAttribute("aria-hidden", "true");
-  container.style.cssText = "position:fixed;left:-10000px;top:0;opacity:0;";
-
-  const image = documentApi.createElement("img");
-  image.src = item.imageUrl;
-  image.alt = item.title || "GIF";
-  container.appendChild(image);
-  documentApi.body.appendChild(container);
-
-  try {
-    container.focus({ preventScroll: true });
-    const range = documentApi.createRange();
-    range.selectNodeContents(container);
-    selection.removeAllRanges();
-    selection.addRange(range);
-    if (!documentApi.execCommand("copy")) {
-      throw new Error("The browser rejected the legacy rich HTML copy command.");
-    }
-  } finally {
-    selection.removeAllRanges();
-    container.remove();
-    previousRanges.forEach((range) => selection.addRange(range));
-    previouslyFocused?.focus({ preventScroll: true });
-  }
-}
-
 function errorDetails(error) {
   return {
     name: error?.name ?? "Error",
@@ -155,20 +114,6 @@ export async function copyMediaToClipboard(item) {
   const clipboard = globalThis.navigator?.clipboard;
   const ClipboardItemConstructor = globalThis.ClipboardItem;
   const logger = createClipboardLogger(item, mediaUrl, mimeType);
-  if (mimeType === "image/gif") {
-    try {
-      copyWithLegacyHtmlSelection(item);
-      logger.log("Legacy contenteditable copy command accepted", {
-        selectedContent: "GIF image element",
-        note: "The browser does not expose the copied native clipboard formats to this page.",
-      });
-      logger.close();
-      return { method: "legacy-html", mimeType };
-    } catch (error) {
-      logger.log("Legacy contenteditable copy failed", errorDetails(error));
-    }
-  }
-
   if (!clipboard || typeof clipboard.write !== "function" ||
     typeof ClipboardItemConstructor !== "function") {
     logger.log("Async Clipboard API unavailable", {
@@ -257,7 +202,9 @@ export async function copyMediaToClipboard(item) {
 
   try {
     if (mimeType === "image/gif") {
-      const formats = {};
+      const formats = {
+        "text/plain": new Blob([mediaUrl], { type: "text/plain" }),
+      };
       if (richHtmlSupport !== false) {
         const html = `<img src="${escapeHtml(mediaUrl)}" alt="${escapeHtml(item.title || "GIF")}">`;
         formats["text/html"] = new Blob([html], { type: "text/html" });
@@ -285,6 +232,7 @@ export async function copyMediaToClipboard(item) {
         "GIF rich HTML clipboard write",
         {
           "text/html": new Blob([html], { type: "text/html" }),
+          "text/plain": new Blob([mediaUrl], { type: "text/plain" }),
         },
         { method: "rich-html", mimeType },
       );

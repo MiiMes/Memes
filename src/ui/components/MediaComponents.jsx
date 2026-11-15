@@ -85,7 +85,6 @@ export function MediaCard({
       const copyFormat = await copyMediaToClipboard(item);
       const mediaName = item.kind === "sticker" ? "Sticker" : "GIF";
       const copyMessages = {
-        "legacy-html": "Legacy HTML copy was accepted; target app paste behavior varies.",
         "rich-html": "GIF copied as rich HTML; target app support varies.",
         "static-png": "GIF animation could not be copied; its first frame was copied as a static PNG.",
         native: `${mediaName} bytes copied (${copyFormat.mimeType}); paste to verify.`,
