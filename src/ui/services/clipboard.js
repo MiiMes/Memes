@@ -1,7 +1,30 @@
 const MAX_STATIC_PNG_PIXELS = 16_000_000;
+const SUPPORTED_IMAGE_MIME_TYPES = new Set([
+  "image/gif",
+  "image/webp",
+  "image/png",
+  "image/jpeg",
+]);
 
 function imageMimeType(url) {
-  const pathname = new URL(url).pathname.toLowerCase();
+  if (typeof url !== "string" || !url) return "";
+  if (/^data:/i.test(url)) {
+    const commaIndex = url.indexOf(",");
+    if (commaIndex < 0) return "";
+    const [mimeType, ...parameters] = url.slice(5, commaIndex).split(";");
+    const normalizedMimeType = mimeType.toLowerCase();
+    return parameters.some((parameter) => parameter.toLowerCase() === "base64") &&
+      SUPPORTED_IMAGE_MIME_TYPES.has(normalizedMimeType)
+      ? normalizedMimeType
+      : "";
+  }
+
+  let pathname;
+  try {
+    pathname = new URL(url).pathname.toLowerCase();
+  } catch {
+    return "";
+  }
   if (pathname.endsWith(".gif")) return "image/gif";
   if (pathname.endsWith(".webp")) return "image/webp";
   if (pathname.endsWith(".png")) return "image/png";
@@ -73,6 +96,7 @@ function errorDetails(error) {
 }
 
 function mediaLocation(url) {
+  if (typeof url === "string" && /^data:/i.test(url)) return "base64-data-url";
   try {
     const parsedUrl = new URL(url);
     return `${parsedUrl.origin}${parsedUrl.pathname}`;
