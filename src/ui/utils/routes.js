@@ -1,6 +1,6 @@
 export function readPage() {
   const page = window.location.hash.replace(/^#\/?/, "").split("/")[0];
-  return ["explore", "reactions", "api"].includes(page) ? page : "home";
+  return ["explore", "reactions", "favorites", "api"].includes(page) ? page : "home";
 }
 
 export function getLogicalRoute(action, { q, kind, locale, providers }) {

@@ -11,6 +11,8 @@ export function ProviderSections({
   kind,
   locale,
   logRequest,
+  isFavorite,
+  onToggleFavorite,
 }) {
   if (categoryView) {
     return (
@@ -53,6 +55,8 @@ export function ProviderSections({
                     item={item}
                     key={`${provider}-${item.id}-${index}`}
                     copyOnClick={!item.video && item.kind !== "clip"}
+                    isFavorite={isFavorite(item)}
+                    onToggleFavorite={onToggleFavorite}
                   />
                 ))}
               </div>

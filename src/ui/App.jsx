@@ -5,6 +5,7 @@ import {
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { LOCALES } from "./constants/appConstants.js";
 import { ApiConsole } from "./components/ApiConsole.jsx";
+import { FavoritesSection } from "./components/FavoritesSection.jsx";
 import { MediaSwitch, ProviderFilters } from "./components/MediaComponents.jsx";
 import { ProviderSections } from "./components/ProviderSections.jsx";
 import { ReactionSections } from "./components/ReactionSections.jsx";
@@ -37,8 +38,15 @@ function MemeApp() {
     trendingSearchErrors, visibleCategories, categoriesQuery, apiAction, setApiAction,
     apiQuery, setApiQuery, apiQueryResult, consoleRoute, consoleJson, copied,
     copyJson, submitSearch, chooseSearch, toggleProvider, runApi, clearLogs,
+    favorites, favoritesError, isFavorite, toggleFavorite,
   } = useAppController();
-  const pageHeading = page === "explore" ? "Explore" : page === "reactions" ? "Reaction GIFs" : "API console";
+  const pageHeading = page === "explore"
+    ? "Explore"
+    : page === "reactions"
+      ? "Reaction GIFs"
+      : page === "favorites"
+        ? "Favorites"
+        : "API console";
 
   return (
     <div className="app-shell">
@@ -49,6 +57,7 @@ function MemeApp() {
         <nav className="main-nav" aria-label="Main navigation">
           <a className={page === "explore" ? "active" : ""} href="#/explore">Explore</a>
           <a className={page === "reactions" ? "active" : ""} href="#/reactions">Reactions</a>
+          <a className={page === "favorites" ? "active" : ""} href="#/favorites">Favorites</a>
           <a className={page === "api" ? "active" : ""} href="#/api">API console</a>
         </nav>
         <label className="locale-select">
@@ -74,6 +83,8 @@ function MemeApp() {
                   ? "A whole world of moods, moments, and memes."
                   : page === "reactions"
                     ? "Every feeling has a GIF. Find yours."
+                    : page === "favorites"
+                      ? "Your favorite GIFs, all in one place."
                     : "Run provider requests and inspect JSON, status, and timing."}
             </p>
             {page === "home" && (
@@ -98,6 +109,9 @@ function MemeApp() {
         </section>
 
         <section className="content-section">
+          {favoritesError && (
+            <p className="favorites-storage-error" role="status">{favoritesError}</p>
+          )}
           {page === "api" ? (
             <ApiConsole
               action={apiAction}
@@ -117,6 +131,12 @@ function MemeApp() {
               copyJson={copyJson}
               logs={logs}
               clearLogs={clearLogs}
+            />
+          ) : page === "favorites" ? (
+            <FavoritesSection
+              favorites={favorites}
+              isFavorite={isFavorite}
+              onToggleFavorite={toggleFavorite}
             />
           ) : (
             <>
@@ -179,6 +199,8 @@ function MemeApp() {
                   providers={providers}
                   results={visibleResults}
                   loading={mediaQuery.isPending || mediaQuery.isFetching}
+                  isFavorite={isFavorite}
+                  onToggleFavorite={toggleFavorite}
                 />
               )}
             </>

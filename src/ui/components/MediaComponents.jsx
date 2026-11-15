@@ -40,6 +40,8 @@ export function MediaCard({
   cardRef,
   overlayAlwaysVisible = false,
   copyOnClick = false,
+  isFavorite = false,
+  onToggleFavorite,
 }) {
   const videoRef = useRef(null);
   const copyFeedbackTimer = useRef(null);
@@ -116,6 +118,8 @@ export function MediaCard({
   const ariaLabel = copyOnClick
     ? `Copy ${item.title} to clipboard`
     : item.video ? `Play ${item.title} with sound` : `Search ${item.title}`;
+  const canFavorite = item.kind === "gif" && Boolean(item.imageUrl) &&
+    !item.video && typeof onToggleFavorite === "function";
 
   const content = item.video ? (
     <video
@@ -166,6 +170,18 @@ export function MediaCard({
           </span>
         </span>
       </button>
+      {canFavorite && (
+        <button
+          className={`favorite-button ${isFavorite ? "active" : ""}`}
+          type="button"
+          aria-label={`${isFavorite ? "Remove" : "Add"} ${item.title} ${isFavorite ? "from" : "to"} favorites`}
+          aria-pressed={isFavorite}
+          title={isFavorite ? "Remove from favorites" : "Add to favorites"}
+          onClick={() => onToggleFavorite(item)}
+        >
+          <span aria-hidden="true">{isFavorite ? "♥" : "♡"}</span>
+        </button>
+      )}
     </article>
   );
 }

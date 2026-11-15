@@ -4,11 +4,13 @@ import {
   TRENDING_SEARCH_PROVIDERS,
 } from "../constants/appConstants.js";
 import { getLogicalRoute } from "../utils/routes.js";
+import { useFavorites } from "./useFavorites.js";
 import { useHashRoute } from "./useHashRoute.js";
 import { useProviderQueries } from "./useProviderQueries.js";
 
 export function useAppController() {
   const { page, navigate } = useHashRoute();
+  const { favorites, favoritesError, isFavorite, toggleFavorite } = useFavorites();
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
   const [kind, setKind] = useState("gif");
@@ -137,6 +139,7 @@ export function useAppController() {
   return {
     page, query, setQuery, submittedQuery, kind, setKind, locale, setLocale,
     providers, logs, logRequest, mediaQuery, visibleResults,
+    favorites, favoritesError, isFavorite, toggleFavorite,
     trendingSearchTerms, trendingSearchErrors, visibleCategories, categoriesQuery,
     apiAction, setApiAction, apiQuery, setApiQuery, apiQueryResult,
     consoleRoute, consoleJson, copied, copyJson, submitSearch, chooseSearch,
