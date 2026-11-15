@@ -12,6 +12,7 @@ export function MemeEditor({ item, onClose }) {
   const [copyFeedback, setCopyFeedback] = useState(null);
   const [outputUrl, setOutputUrl] = useState("");
   const [outputBlob, setOutputBlob] = useState(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
   useEffect(() => {
     if (!outputUrl) return undefined;
@@ -29,6 +30,7 @@ export function MemeEditor({ item, onClose }) {
   async function createMeme(event) {
     event.preventDefault();
     setIsExporting(true);
+    setIsPreviewOpen(true);
     setExportError("");
     setOutputUrl("");
     setOutputBlob(null);
@@ -44,6 +46,7 @@ export function MemeEditor({ item, onClose }) {
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       setExportError(message);
+      setIsPreviewOpen(false);
     } finally {
       setIsExporting(false);
     }
@@ -165,6 +168,52 @@ export function MemeEditor({ item, onClose }) {
           </p>
         )}
       </form>
+      {isPreviewOpen && (
+        <div
+          className="meme-editor-dialog-backdrop"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setIsPreviewOpen(false);
+          }}
+        >
+          <section
+            className="meme-editor-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="meme-editor-dialog-title"
+          >
+            <div className="meme-editor-dialog-heading">
+              <h2 id="meme-editor-dialog-title">
+                {isExporting ? "Creating your GIF…" : "Your animated meme"}
+              </h2>
+              <button
+                className="meme-editor-dialog-close"
+                type="button"
+                onClick={() => setIsPreviewOpen(false)}
+                aria-label="Close GIF preview"
+              >
+                ×
+              </button>
+            </div>
+            {isExporting ? (
+              <div className="meme-editor-dialog-loading" role="status">
+                <span className="loader" />
+                <span>Generating your GIF with the edited text…</span>
+              </div>
+            ) : outputUrl && (
+              <>
+                <img
+                  className="meme-editor-dialog-image"
+                  src={outputUrl}
+                  alt={item.title || "Your animated meme"}
+                />
+                <p className="meme-editor-dialog-note">
+                  Right-click the GIF to copy it, then paste it where you want.
+                </p>
+              </>
+            )}
+          </section>
+        </div>
+      )}
     </section>
   );
 }
