@@ -528,25 +528,33 @@ function MemeApp() {
       const useStaticTenorCategories =
         page === "explore" && kind === "gif" && providers.includes("tenor");
       const results = await requestProviders({
-        providers: useStaticTenorCategories
-          ? providers.filter((provider) => provider !== "tenor")
-          : providers,
+        providers,
         action: "categories",
         kind: categoryKind,
         locale,
         logRequest,
       });
       if (!useStaticTenorCategories) return results;
+      const tenorCategories = results.tenor?.items ?? [];
+      const categoryKey = (value) => String(value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
       return {
         ...results,
         tenor: {
-          items: TENOR_GIF_EXPLORE_CATEGORIES.map((title, index) => ({
-            id: `tenor-explore-${index}`,
-            title,
-            query: title,
-            provider: "tenor",
-            kind: "gif",
-          })),
+          ...results.tenor,
+          items: TENOR_GIF_EXPLORE_CATEGORIES.map((title, index) => {
+            const key = categoryKey(title);
+            const preview = tenorCategories.find((category) =>
+              [category.title, category.query].some((value) => categoryKey(value) === key),
+            );
+            return {
+              id: `tenor-explore-${index}`,
+              title,
+              query: title,
+              imageUrl: preview?.imageUrl ?? "",
+              provider: "tenor",
+              kind: "gif",
+            };
+          }),
         },
       };
     },
