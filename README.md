@@ -30,6 +30,8 @@ common regional variants. Tenor receives both `locale` and `country`; KLIPY
 receives the combined locale. GIPHY receives its documented `lang` values and
 the selected country where supported; for languages outside GIPHY's supported
 list, the `lang` parameter is omitted rather than sending an unsupported code.
+Tenor's GIF Explore section uses a static list of its top-level categories,
+while other Explore categories are loaded from their providers.
 
 ## Important: no hosted REST API
 

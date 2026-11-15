@@ -128,6 +128,23 @@ const MEDIA_TYPES = [
   ["sticker", "Stickers"],
   ["clip", "Clips"],
 ];
+const TENOR_GIF_EXPLORE_CATEGORIES = [
+  "Movies",
+  "TV Shows",
+  "Animals",
+  "Food & Drink",
+  "Greetings & Sayings",
+  "Holidays",
+  "Gestures",
+  "Sports",
+  "Celebrities",
+  "Music",
+  "Interests",
+  "Internet",
+  "Weather",
+  "Places",
+  "Memes",
+];
 const API_ACTIONS = [
   ["search", "Search"],
   ["trending", "Trending media"],
@@ -506,10 +523,33 @@ function MemeApp() {
   });
   const categoryKind = page === "reactions" ? "gif" : kind;
   const categoriesQuery = useQuery({
-    queryKey: ["categories", categoryKind, locale, providers],
-    queryFn: () => requestProviders({
-      providers, action: "categories", kind: categoryKind, locale, logRequest,
-    }),
+    queryKey: ["categories", page, categoryKind, locale, providers],
+    queryFn: async () => {
+      const useStaticTenorCategories =
+        page === "explore" && kind === "gif" && providers.includes("tenor");
+      const results = await requestProviders({
+        providers: useStaticTenorCategories
+          ? providers.filter((provider) => provider !== "tenor")
+          : providers,
+        action: "categories",
+        kind: categoryKind,
+        locale,
+        logRequest,
+      });
+      if (!useStaticTenorCategories) return results;
+      return {
+        ...results,
+        tenor: {
+          items: TENOR_GIF_EXPLORE_CATEGORIES.map((title, index) => ({
+            id: `tenor-explore-${index}`,
+            title,
+            query: title,
+            provider: "tenor",
+            kind: "gif",
+          })),
+        },
+      };
+    },
     enabled: page === "explore" || page === "reactions",
   });
   const apiQueryResult = useQuery({
