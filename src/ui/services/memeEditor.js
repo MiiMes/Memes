@@ -7,6 +7,8 @@ const MAX_GIF_BYTES = 20 * 1024 * 1024;
 const MAX_GIF_FRAMES = 120;
 const MAX_GIF_PIXELS = 1_500_000;
 const MAX_TOTAL_FRAME_PIXELS = 30_000_000;
+const MAX_VIDEO_CLIP_MS = 10_000;
+const VIDEO_FRAME_INTERVAL_MS = 100;
 const BAYER_4X4 = [
   [0, 8, 2, 10],
   [12, 4, 14, 6],
@@ -71,6 +73,63 @@ export function drawCaption(context, text, position, width, height, fontSizePerc
   context.restore();
 }
 
+export function getVideoOutputDimensions(sourceWidth, sourceHeight, requestedWidth, requestedHeight) {
+  if (requestedWidth && requestedHeight) {
+    return {
+      width: Math.max(1, Math.min(1200, Math.round(requestedWidth))),
+      height: Math.max(1, Math.min(1200, Math.round(requestedHeight))),
+    };
+  }
+  const scale = Math.min(
+    1,
+    1200 / sourceWidth,
+    1200 / sourceHeight,
+    Math.sqrt(MAX_GIF_PIXELS / (sourceWidth * sourceHeight)),
+  );
+  return {
+    width: Math.max(1, Math.floor(sourceWidth * scale)),
+    height: Math.max(1, Math.floor(sourceHeight * scale)),
+  };
+}
+
+function webmMimeType() {
+  const recorder = globalThis.MediaRecorder;
+  const candidates = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
+  if (typeof recorder?.isTypeSupported !== "function") return "video/webm";
+  return candidates.find((mimeType) =>
+    recorder.isTypeSupported(mimeType),
+  ) ?? "";
+}
+
+export function supportsWebMExport() {
+  return Boolean(
+    typeof globalThis.MediaRecorder === "function" &&
+    typeof globalThis.HTMLCanvasElement?.prototype?.captureStream === "function" &&
+    webmMimeType(),
+  );
+}
+
+function layerAtTime(layer, timeMs) {
+  const keyframes = Array.isArray(layer.keyframes)
+    ? [...layer.keyframes].sort((left, right) => left.timeMs - right.timeMs)
+    : [];
+  if (timeMs === null || keyframes.length === 0) return layer;
+
+  const before = [...keyframes].reverse().find((keyframe) => keyframe.timeMs <= timeMs);
+  const after = keyframes.find((keyframe) => keyframe.timeMs >= timeMs);
+  if (!before) return { ...layer, x: after.x, y: after.y, position: "custom" };
+  if (!after || after.timeMs === before.timeMs) {
+    return { ...layer, x: before.x, y: before.y, position: "custom" };
+  }
+  const progress = (timeMs - before.timeMs) / (after.timeMs - before.timeMs);
+  return {
+    ...layer,
+    x: before.x + (after.x - before.x) * progress,
+    y: before.y + (after.y - before.y) * progress,
+    position: "custom",
+  };
+}
+
 export function drawMemeOverlays(
   context,
   textLayers,
@@ -82,14 +141,15 @@ export function drawMemeOverlays(
 ) {
   textLayers.forEach((layer) => {
     if (timeMs !== null && (timeMs < (layer.startMs ?? 0) || timeMs > (layer.endMs ?? Infinity))) return;
+    const positionedLayer = layerAtTime(layer, timeMs);
     drawCaption(
       context,
       layer.text,
-      layer.position ?? "custom",
+      positionedLayer.position ?? "custom",
       width,
       height,
       fontSizePercent,
-      layer,
+      positionedLayer,
     );
   });
 
@@ -116,8 +176,8 @@ function drawTransformedSource(context, source, width, height, transform = {}) {
   const zoom = Math.max(1, Math.min(2, Number(transform.zoom) || 1));
   const brightness = Math.max(50, Math.min(150, Number(transform.brightness) || 100));
   const contrast = Math.max(50, Math.min(150, Number(transform.contrast) || 100));
-  const sourceWidth = source.naturalWidth || source.width;
-  const sourceHeight = source.naturalHeight || source.height;
+  const sourceWidth = source.videoWidth || source.naturalWidth || source.width;
+  const sourceHeight = source.videoHeight || source.naturalHeight || source.height;
   const scale = Math.max(width / sourceWidth, height / sourceHeight) * zoom;
   context.save();
   context.filter = `brightness(${brightness}%) contrast(${contrast}%)`;
@@ -170,6 +230,22 @@ function isGif(bytes) {
 
 export async function inspectMedia(source) {
   const sourceBlob = await loadSourceBlob(source);
+  if (sourceBlob.type.startsWith("video/")) {
+    const url = URL.createObjectURL(sourceBlob);
+    try {
+      const video = await loadVideo(url);
+      return {
+        isGif: false,
+        isVideo: true,
+        durationMs: Math.round(video.duration * 1000),
+        frameCount: Math.ceil(video.duration * 1000 / VIDEO_FRAME_INTERVAL_MS),
+        width: video.videoWidth,
+        height: video.videoHeight,
+      };
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
   if (!isGif(await sourceBlob.slice(0, 6).arrayBuffer())) {
     const url = URL.createObjectURL(sourceBlob);
     try {
@@ -185,6 +261,7 @@ export async function inspectMedia(source) {
       }
       return {
         isGif: false,
+        isVideo: false,
         durationMs: 0,
         frameCount: 1,
         width: image.naturalWidth,
@@ -203,6 +280,7 @@ export async function inspectMedia(source) {
   const frames = parsedGif.frames.filter((frame) => frame.image);
   return {
     isGif: true,
+    isVideo: false,
     durationMs: frames.reduce(
       (duration, frame) => duration + Math.max(20, Number(frame.gce?.delay || 10) * 10),
       0,
@@ -211,6 +289,319 @@ export async function inspectMedia(source) {
     width: parsedGif.lsd.width,
     height: parsedGif.lsd.height,
   };
+}
+
+function loadVideo(url) {
+  const video = globalThis.document.createElement("video");
+  video.preload = "auto";
+  video.muted = true;
+  video.playsInline = true;
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      video.removeEventListener("loadedmetadata", onLoaded);
+      video.removeEventListener("error", onError);
+    };
+    const onLoaded = () => {
+      cleanup();
+      if (!Number.isFinite(video.duration) || !video.videoWidth || !video.videoHeight) {
+        reject(new Error("This video has invalid dimensions or duration."));
+        return;
+      }
+      resolve(video);
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error("This browser could not decode the selected video."));
+    };
+    video.addEventListener("loadedmetadata", onLoaded, { once: true });
+    video.addEventListener("error", onError, { once: true });
+    video.src = url;
+    video.load();
+  });
+}
+
+function seekVideo(video, timeSeconds) {
+  if (Math.abs(video.currentTime - timeSeconds) < 0.001) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      video.removeEventListener("seeked", onSeeked);
+      video.removeEventListener("error", onError);
+    };
+    const onSeeked = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error("The browser could not seek to a video frame."));
+    };
+    video.addEventListener("seeked", onSeeked, { once: true });
+    video.addEventListener("error", onError, { once: true });
+    video.currentTime = timeSeconds;
+  });
+}
+
+function waitForVideoFrame(video) {
+  if (video.readyState >= 2) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      video.removeEventListener("loadeddata", onLoaded);
+      video.removeEventListener("error", onError);
+    };
+    const onLoaded = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error("The video frame could not be decoded."));
+    };
+    video.addEventListener("loadeddata", onLoaded, { once: true });
+    video.addEventListener("error", onError, { once: true });
+    if (video.readyState >= 2) onLoaded();
+  });
+}
+
+async function encodeVideo(sourceBlob, captions) {
+  if (sourceBlob.size > MAX_GIF_BYTES) {
+    throw new Error("This video is too large to edit in the browser.");
+  }
+  const url = URL.createObjectURL(sourceBlob);
+  let video;
+  try {
+    video = await loadVideo(url);
+    const width = video.videoWidth;
+    const height = video.videoHeight;
+    const { width: outputWidth, height: outputHeight } = getVideoOutputDimensions(
+      width,
+      height,
+      captions.outputWidth,
+      captions.outputHeight,
+    );
+    if (outputWidth * outputHeight > MAX_GIF_PIXELS) {
+      throw new Error("This video frame is too large to edit in the browser.");
+    }
+
+    async function encodeVideoAsWebM(video, captions) {
+      if (!supportsWebMExport()) {
+        throw new Error("WebM export requires browser support for canvas capture and MediaRecorder.");
+      }
+      if (captions.reverse) {
+        throw new Error("WebM export does not support reverse playback. Turn off Reverse playback or export as GIF.");
+      }
+
+      let stream;
+      let animationFrameId = 0;
+      let recorder;
+      let recordingResult;
+      try {
+        const { width: outputWidth, height: outputHeight } = getVideoOutputDimensions(
+          video.videoWidth,
+          video.videoHeight,
+          captions.outputWidth,
+          captions.outputHeight,
+        );
+        const durationMs = Math.round(video.duration * 1000);
+        const trimStartMs = Math.max(0, Number(captions.trimStartMs) || 0);
+        const trimEndMs = Math.min(durationMs, Number(captions.trimEndMs) || durationMs);
+        const clipDurationMs = trimEndMs - trimStartMs;
+        if (clipDurationMs <= 0) {
+          throw new Error("Choose a video timeline range that includes a frame.");
+        }
+        if (clipDurationMs > MAX_VIDEO_CLIP_MS) {
+          throw new Error("WebM export is limited to 10 seconds. Trim the clip and try again.");
+        }
+
+        const { canvas, context } = createCanvas(outputWidth, outputHeight);
+        if (typeof canvas.captureStream !== "function") {
+          throw new Error("This browser cannot capture the edited canvas as video.");
+        }
+        await waitForVideoFrame(video);
+        await seekVideo(video, trimStartMs / 1000);
+        drawTransformedSource(context, video, outputWidth, outputHeight, captions.transform);
+        drawMemeOverlays(
+          context,
+          captions.textLayers ?? [
+            { text: captions.topText, position: "top" },
+            { text: captions.bottomText, position: "bottom" },
+          ],
+          captions.strokes ?? [],
+          outputWidth,
+          outputHeight,
+          captions.fontSizePercent,
+          0,
+        );
+        stream = canvas.captureStream(15);
+        const mimeType = webmMimeType();
+        recorder = new globalThis.MediaRecorder(stream, {
+          mimeType,
+          videoBitsPerSecond: 4_000_000,
+        });
+        recordingResult = new Promise((resolve, reject) => {
+          const chunks = [];
+          recorder.addEventListener("dataavailable", (event) => {
+            if (event.data.size) chunks.push(event.data);
+          });
+          recorder.addEventListener("error", (event) => {
+            reject(event.error ?? new Error("The browser could not encode this WebM."));
+          }, { once: true });
+          recorder.addEventListener("stop", () => {
+            resolve(new Blob(chunks, { type: recorder.mimeType || mimeType }));
+          }, { once: true });
+        });
+        recordingResult.catch(() => {});
+        recorder.start(250);
+
+        video.playbackRate = Math.max(0.25, Math.min(4, Number(captions.speed) || 1));
+        const playbackStartedAt = globalThis.performance.now();
+        await video.play();
+        await new Promise((resolve, reject) => {
+          const drawFrame = () => {
+            const timeMs = Math.max(0, video.currentTime * 1000 - trimStartMs);
+            drawTransformedSource(context, video, outputWidth, outputHeight, captions.transform);
+            drawMemeOverlays(
+              context,
+              captions.textLayers ?? [
+                { text: captions.topText, position: "top" },
+                { text: captions.bottomText, position: "bottom" },
+              ],
+              captions.strokes ?? [],
+              outputWidth,
+              outputHeight,
+              captions.fontSizePercent,
+              timeMs,
+            );
+            if (video.currentTime * 1000 >= trimEndMs) {
+              video.pause();
+              resolve();
+              return;
+            }
+            if (globalThis.performance.now() - playbackStartedAt > clipDurationMs / video.playbackRate + 5000) {
+              video.pause();
+              reject(new Error("WebM capture timed out before the selected clip finished."));
+              return;
+            }
+            animationFrameId = globalThis.requestAnimationFrame(drawFrame);
+          };
+          animationFrameId = globalThis.requestAnimationFrame(drawFrame);
+        });
+
+        recorder.stop();
+        const blob = await recordingResult;
+        if (!blob.size) throw new Error("The browser produced an empty WebM file.");
+        return blob;
+      } catch (cause) {
+        if (video && !video.paused) video.pause();
+        if (recorder?.state === "recording") {
+          recorder.stop();
+          await recordingResult?.catch(() => {});
+        }
+        throw cause;
+      } finally {
+        if (animationFrameId) globalThis.cancelAnimationFrame(animationFrameId);
+        stream?.getTracks().forEach((track) => track.stop());
+      }
+    }
+
+    if (captions.outputFormat === "webm") {
+      return await encodeVideoAsWebM(video, captions);
+    }
+
+    const durationMs = Math.round(video.duration * 1000);
+    const trimStartMs = Math.max(0, Number(captions.trimStartMs) || 0);
+    const trimEndMs = Math.min(durationMs, Number(captions.trimEndMs) || durationMs);
+    const clipDurationMs = trimEndMs - trimStartMs;
+    if (clipDurationMs <= 0) {
+      throw new Error("Choose a video timeline range that includes at least one frame.");
+    }
+    if (clipDurationMs > MAX_VIDEO_CLIP_MS) {
+      throw new Error("Video-to-GIF export is limited to 10 seconds. Trim the clip and try again.");
+    }
+
+    const frameCount = Math.max(1, Math.min(
+      MAX_GIF_FRAMES,
+      Math.ceil(clipDurationMs / VIDEO_FRAME_INTERVAL_MS),
+      Math.floor(MAX_TOTAL_FRAME_PIXELS / (outputWidth * outputHeight)),
+    ));
+    const frameIntervalMs = clipDurationMs / frameCount;
+    if (captions.reverse && outputWidth * outputHeight * frameCount > 6_000_000) {
+      throw new Error("Reverse playback is limited to smaller video clips to protect browser memory.");
+    }
+
+    const { context } = createCanvas(outputWidth, outputHeight);
+    const encoder = GIFEncoder();
+    const reverseFrames = [];
+    const speed = Math.max(0.25, Math.min(4, Number(captions.speed) || 1));
+    const colorCount = Math.max(2, Math.min(256, captions.colorCount ?? 256));
+    let encodedCount = 0;
+    await waitForVideoFrame(video);
+
+    for (let index = 0; index < frameCount; index += 1) {
+      const frameTimeMs = Math.min(Math.round(index * frameIntervalMs), clipDurationMs - 1);
+      await seekVideo(video, (trimStartMs + frameTimeMs) / 1000);
+      drawTransformedSource(
+        context,
+        video,
+        outputWidth,
+        outputHeight,
+        captions.transform,
+      );
+      drawMemeOverlays(
+        context,
+        captions.textLayers ?? [
+          { text: captions.topText, position: "top" },
+          { text: captions.bottomText, position: "bottom" },
+        ],
+        captions.strokes ?? [],
+        outputWidth,
+        outputHeight,
+        captions.fontSizePercent,
+        frameTimeMs,
+      );
+
+      const frameData = context.getImageData(0, 0, outputWidth, outputHeight).data;
+      const remainingMs = clipDurationMs - frameTimeMs;
+      const delay = Math.max(
+        20,
+        Math.round(Math.min(frameIntervalMs, remainingMs) / speed),
+      );
+      if (captions.reverse) {
+        reverseFrames.push({ data: new Uint8ClampedArray(frameData), delay });
+      } else {
+        const palette = quantize(frameData, colorCount);
+        encoder.writeFrame(
+          applyPalette(captions.dither ? ditherPixels(frameData, outputWidth, outputHeight) : frameData, palette),
+          outputWidth,
+          outputHeight,
+          { palette, delay, dispose: 1, ...(encodedCount === 0 ? { repeat: 0 } : {}) },
+        );
+      }
+      encodedCount += 1;
+      if (index > 0 && index % 4 === 0) {
+        await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+      }
+    }
+
+    if (captions.reverse) {
+      reverseFrames.reverse().forEach(({ data, delay }, index) => {
+        const palette = quantize(data, colorCount);
+        encoder.writeFrame(
+          applyPalette(captions.dither ? ditherPixels(data, outputWidth, outputHeight) : data, palette),
+          outputWidth,
+          outputHeight,
+          { palette, delay, dispose: 1, ...(index === 0 ? { repeat: 0 } : {}) },
+        );
+      });
+    }
+    if (!encodedCount) throw new Error("The selected video clip did not contain any decodable frames.");
+    encoder.finish();
+    return new Blob([encoder.bytes()], { type: "image/gif" });
+  } finally {
+    video?.pause();
+    video?.removeAttribute("src");
+    video?.load();
+    URL.revokeObjectURL(url);
+  }
 }
 
 async function encodeGif(sourceBlob, captions) {
@@ -438,6 +829,9 @@ export async function createCaptionedGif(source, captions) {
 
 export async function createCaptionedMedia(source, captions) {
   const sourceBlob = await loadSourceBlob(source);
+  if (sourceBlob.type.startsWith("video/")) {
+    return encodeVideo(sourceBlob, captions);
+  }
   return isGif(await sourceBlob.slice(0, 6).arrayBuffer())
     ? encodeGif(sourceBlob, captions)
     : encodeImage(sourceBlob, captions);

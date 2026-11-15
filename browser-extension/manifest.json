@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Memes: Send Image to Editor",
+  "version": "1.0.0",
+  "description": "Open a web image in the Memes browser-based editor.",
+  "permissions": ["contextMenus"],
+  "background": {
+    "service_worker": "background.js"
+  }
+}

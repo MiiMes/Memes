@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "memes-app-";
-const CACHE_NAME = `${CACHE_PREFIX}v1`;
+const CACHE_NAME = `${CACHE_PREFIX}v2`;
 const APP_BASE = new URL("./", self.location.href);
 
 self.addEventListener("install", (event) => {

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   PROVIDERS,
   TRENDING_SEARCH_PROVIDERS,
@@ -10,6 +10,26 @@ import { useProviderQueries } from "./useProviderQueries.js";
 import { rankSimilarMedia } from "../services/visualSimilarity.js";
 
 const RECENT_SEARCHES_KEY = "memes:recent-searches:v1";
+
+function readEditorSourceFromHash() {
+  const query = globalThis.location?.hash?.split("?").slice(1).join("?") ?? "";
+  const params = new URLSearchParams(query);
+  const source = params.get("source");
+  if (!source) return null;
+  try {
+    const url = new URL(source);
+    if (url.protocol !== "https:") return null;
+    return {
+      id: `external-${url.href}`,
+      title: params.get("title")?.slice(0, 100) || "Shared image",
+      imageUrl: url.href,
+      provider: "browser-extension",
+      kind: "gif",
+    };
+  } catch {
+    return null;
+  }
+}
 
 function loadRecentSearches() {
   try {
@@ -35,7 +55,10 @@ export function useAppController() {
     favorites, favoritesError, isFavorite, toggleFavorite,
     collections, collectionsError, createCollection, updateFavorite,
   } = useFavorites();
-  const [editorItem, setEditorItem] = useState(null);
+  const [editorItem, setEditorItem] = useState(readEditorSourceFromHash);
+  const [editorFile, setEditorFile] = useState(null);
+  const [editorDraft, setEditorDraft] = useState(null);
+  const [fileOpenError, setFileOpenError] = useState("");
   const [editorReturnPage, setEditorReturnPage] = useState("home");
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
@@ -58,6 +81,41 @@ export function useAppController() {
   const similarityRequestRef = useRef(0);
   const [recentSearchState, setRecentSearchState] = useState(loadRecentSearches);
   const { searches: recentSearches, error: recentSearchError } = recentSearchState;
+
+  const openLocalFile = useCallback((file) => {
+    setFileOpenError("");
+    setEditorItem(null);
+    setEditorFile(file);
+    setEditorDraft(null);
+    setEditorReturnPage(page === "editor" ? "home" : page);
+    navigate("editor");
+  }, [navigate, page]);
+
+  useEffect(() => {
+    function handleFileOpen(event) {
+      if (!(event.detail instanceof Blob)) return;
+      if (globalThis.__memesPendingFile === event.detail) {
+        globalThis.__memesPendingFile = null;
+      }
+      openLocalFile(event.detail);
+    }
+    const handleFileOpenError = (event) => {
+      setFileOpenError(`The selected file could not be opened. ${event.detail}`);
+      globalThis.__memesFileOpenError = null;
+    };
+    globalThis.addEventListener("memes:file-open", handleFileOpen);
+    globalThis.addEventListener("memes:file-open-error", handleFileOpenError);
+    if (globalThis.__memesPendingFile instanceof Blob) {
+      handleFileOpen({ detail: globalThis.__memesPendingFile });
+    }
+    if (globalThis.__memesFileOpenError) {
+      handleFileOpenError({ detail: globalThis.__memesFileOpenError });
+    }
+    return () => {
+      globalThis.removeEventListener("memes:file-open", handleFileOpen);
+      globalThis.removeEventListener("memes:file-open-error", handleFileOpenError);
+    };
+  }, [openLocalFile]);
 
   const logRequest = useCallback((entry) => {
     setLogs((current) => [entry, ...current].slice(0, 100));
@@ -129,11 +187,23 @@ export function useAppController() {
 
   function openEditor(item) {
     setEditorItem(item);
+    setEditorFile(null);
+    setEditorDraft(null);
     setEditorReturnPage(page === "editor" ? "home" : page);
     navigate("editor");
   }
 
+  function openDraftInEditor(draft) {
+    setEditorItem(null);
+    setEditorFile(null);
+    setEditorDraft(draft);
+    setEditorReturnPage(page === "editor" ? "favorites" : page);
+    navigate("editor");
+  }
+
   function closeEditor() {
+    setEditorFile(null);
+    setEditorDraft(null);
     navigate(editorReturnPage);
   }
 
@@ -266,7 +336,7 @@ export function useAppController() {
     providers, logs, logRequest, mediaQuery, visibleResults,
     favorites, favoritesError, isFavorite, toggleFavorite,
     collections, collectionsError, createCollection, updateFavorite,
-    editorItem, openEditor, closeEditor,
+    editorItem, editorFile, editorDraft, fileOpenError, openEditor, openDraftInEditor, closeEditor,
     trendingSearchTerms, trendingSearchErrors, visibleCategories, categoriesQuery,
     apiAction, setApiAction, apiQuery, setApiQuery, apiQueryResult,
     consoleRoute, consoleJson, copied, copyJson, submitSearch, chooseSearch,

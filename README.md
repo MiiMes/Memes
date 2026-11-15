@@ -39,19 +39,25 @@ reactions without one, it lazily searches that provider for a single preview
 when the tile scrolls into view; TanStack Query caches fetched previews during
 the session.
 
-The browser-only meme editor accepts uploaded or provider GIFs and images,
-supports draggable text and sticker layers, drawing, image adjustments, and
-GIF palette/dithering options. Animated GIFs can be trimmed, sped up, reversed,
-and exported with timed text layers. Canvas presets support square, landscape,
-portrait, and story aspect ratios; output dimensions and file size are shown
-after export. Portable `.meme` project files bundle the source image and editor
-settings for download and import.
+The browser-only meme editor accepts provider GIFs, uploaded images, and local
+MP4, WebM, Ogg, or QuickTime video files up to 20 MB. Video decoding and
+frame-by-frame GIF or video-only WebM generation stay on-device; trim video to
+a maximum 10-second export. WebM requires canvas capture and `MediaRecorder`,
+contains no audio, and does not support reverse playback. Browser codec support
+varies by format. Animated GIFs can be trimmed,
+sped up, reversed, and exported with timed text layers. Text positions can be
+keyframed, and optional face detection can suggest positions across sampled
+video frames. Canvas presets support square, landscape, portrait, and story
+aspect ratios. **Export platform pack** creates a ZIP containing square,
+landscape, and story renders plus an editable `.meme` project. Portable project
+files bundle the source media and editor settings.
 
-Batch variations render up to four alternate captions. Caption suggestions use
-the browser's built-in on-device `LanguageModel` API only when available; face
-placement uses the optional browser `FaceDetector` API when available. Both
-features report when the browser does not support the API, and manual editing
-remains available. Visual similarity compares thumbnails from currently
+Batch variations render up to four alternate captions. Caption suggestions can
+use the browser's built-in on-device multimodal `LanguageModel` API to inspect
+the current image or video frame; the media is not uploaded. Face placement
+uses the optional browser `FaceDetector` API when available. These APIs are
+browser-dependent, report unsupported or failed operations, and leave manual
+editing available. Visual similarity compares thumbnails from currently
 loaded results and favorites on-device; cross-origin image restrictions can
 prevent some images from being compared. It is not a provider-wide reverse
 image search.
@@ -60,10 +66,22 @@ GIFs and still images can be downloaded or shared through the browser; GIF
 export is limited by the format's 256-color palette. Draft source files and
 settings, generated GIF favorites, favorite collections/tags, and recent
 searches are stored locally in the browser and are not synchronized across
-devices. The home search can show results grouped by provider or in one
-combined view. The installable PWA caches the app shell and static assets after
-the first visit, so saved editor data remains available offline; provider
-search still requires a network connection.
+devices. Favorites search includes titles, captions, providers, and tags;
+saved drafts are searchable too. Where supported, **Search by meaning** expands
+a mood query with the browser's on-device language model and searches only the
+local library metadata. Reaction Deck presents filtered favorites in a
+fullscreen view with arrow-key/Space navigation and clipboard actions. The
+home search can show results grouped by provider or in one combined view.
+
+On supported installed desktop PWAs, the manifest registers local image, video,
+and `.meme` project files for **Open with Memes**. Browser support varies; a
+failed file launch is reported in the app. An optional Chromium context-menu
+extension is in [`browser-extension/`](./browser-extension/); it opens a web
+image URL in the editor without host permissions or uploads. Some image hosts
+block browser-side editing, in which case download the image and open it
+locally. The installable PWA caches the app shell and static assets after the
+first visit, so saved editor data remains available offline; provider search
+still requires a network connection.
 
 The language/region selector includes Tenor's documented search languages and
 common regional variants. Tenor receives both `locale` and `country`; KLIPY

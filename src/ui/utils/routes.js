@@ -1,5 +1,5 @@
 export function readPage() {
-  const page = window.location.hash.replace(/^#\/?/, "").split("/")[0];
+  const page = window.location.hash.replace(/^#\/?/, "").split("/")[0].split("?")[0];
   return ["explore", "reactions", "favorites", "editor", "api"].includes(page) ? page : "home";
 }
 

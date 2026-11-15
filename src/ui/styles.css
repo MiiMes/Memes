@@ -159,12 +159,34 @@ h1, h2, h3, p { margin-top: 0; }
 .favorites-empty p { margin-bottom: 10px; }
 .favorites-empty a { color: #c94f3f; font-weight: 700; }
 .favorites-empty a:hover { text-decoration: underline; }
+.favorites-deck-launch { margin-top: 20px; }
+.local-drafts-library { display: grid; gap: 10px; margin-top: 35px; }
+.local-drafts-library > header { display: flex; align-items: end; justify-content: space-between; gap: 12px; }
+.local-drafts-library > header h3 { margin: 0; font: 600 21px "Space Grotesk", sans-serif; letter-spacing: -.5px; }
+.local-drafts-library > header > span, .local-drafts-library > p { color: #89878a; font-size: 11px; }
+.local-drafts-library article { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid #e8e7e5; border-radius: 7px; background: white; }
+.local-drafts-library article > div { display: grid; min-width: 0; gap: 4px; }
+.local-drafts-library article strong, .local-drafts-library article span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.local-drafts-library article strong { font-size: 11px; }
+.local-drafts-library article span { color: #89878a; font-size: 10px; }
+.local-drafts-library article button { flex: 0 0 auto; padding: 8px 10px; border: 0; border-radius: 5px; color: #171718; background: var(--coral); font-size: 10px; font-weight: 700; }
+.reaction-deck-backdrop { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; padding: 20px; background: #080808ed; }
+.reaction-deck { display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 14px; width: min(100%, 1100px); height: min(100%, 800px); padding: 18px; border: 1px solid #444; border-radius: 12px; color: white; background: #171718; }
+.reaction-deck:fullscreen { width: 100%; height: 100%; border: 0; border-radius: 0; }
+.reaction-deck header, .reaction-deck nav { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.reaction-deck header { color: #d3d1d2; font-size: 13px; }
+.reaction-deck header button { width: 34px; height: 34px; border: 1px solid #555; border-radius: 50%; color: white; background: #252426; font-size: 20px; }
+.reaction-deck > img { display: block; width: 100%; height: 100%; min-height: 0; object-fit: contain; }
+.reaction-deck nav { justify-content: center; flex-wrap: wrap; }
+.reaction-deck nav button { min-height: 38px; padding: 8px 13px; border: 1px solid #4d4b4d; border-radius: 6px; color: white; background: #252426; font-size: 11px; font-weight: 700; }
+.reaction-deck nav button:hover { border-color: var(--coral); }
+.reaction-deck > p { margin: 0; color: #a7a5a7; font-size: 10px; text-align: center; }
 .favorites-storage-error { margin: 0 0 18px; border: 1px solid #f0c9c4; border-radius: 8px; padding: 12px 15px; color: #9a4036; background: #fff8f6; font-size: 12px; }
 .meme-editor { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(260px, .7fr); align-items: start; gap: 22px; }
 .meme-editor-workspace { display: grid; gap: 12px; }
 .meme-editor-back { justify-self: start; padding: 8px 11px; border: 1px solid #e4e3e1; border-radius: 6px; color: #555357; background: white; font-size: 11px; font-weight: 600; }
 .meme-editor-preview { position: relative; display: grid; min-height: 300px; max-height: 72vh; place-items: center; overflow: hidden; padding: 10px; border-radius: 11px; background: #171718; }
-.meme-editor-preview img { display: block; max-width: 100%; max-height: 70vh; object-fit: contain; }
+.meme-editor-preview img, .meme-editor-preview video { display: block; max-width: 100%; max-height: 70vh; object-fit: contain; }
 .meme-editor-caption-canvas { position: absolute; z-index: 1; display: block; cursor: grab; pointer-events: auto; touch-action: none; }
 .meme-editor-preview-note { margin: 0; color: #89878a; font-size: 10px; }
 .meme-editor-controls { display: grid; gap: 16px; padding: 20px; border: 1px solid #e8e7e5; border-radius: 11px; background: white; }

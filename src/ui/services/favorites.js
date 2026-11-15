@@ -24,6 +24,9 @@ function normalizeFavorite(item) {
     imageUrl: item.imageUrl,
     provider,
     providers: Array.isArray(item.providers) ? item.providers : [provider],
+    ...(typeof item.captionText === "string" && item.captionText.trim()
+      ? { captionText: item.captionText.trim().slice(0, 1000) }
+      : {}),
     ...(typeof item.generatedGifId === "string" && item.generatedGifId
       ? { generatedGifId: item.generatedGifId, mimeType: "image/gif" }
       : {}),

@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MediaCard } from "./MediaComponents.jsx";
+import { copyMediaToClipboard } from "../services/clipboard.js";
+import { readMemeDrafts } from "../services/favorites.js";
 
 export function FavoritesSection({
   favorites,
@@ -11,12 +13,34 @@ export function FavoritesSection({
   onToggleFavorite,
   onEdit,
   onFindSimilar,
+  onOpenDraft,
 }) {
   const [collectionName, setCollectionName] = useState("");
   const [actionError, setActionError] = useState("");
   const [collectionFilter, setCollectionFilter] = useState("");
   const [tagFilter, setTagFilter] = useState("");
+  const [libraryQuery, setLibraryQuery] = useState("");
+  const [expandedSearchTerms, setExpandedSearchTerms] = useState([]);
+  const [isExpandingSearch, setIsExpandingSearch] = useState(false);
+  const [searchFeedback, setSearchFeedback] = useState("");
+  const [isDeckOpen, setIsDeckOpen] = useState(false);
+  const [deckIndex, setDeckIndex] = useState(0);
+  const [deckFeedback, setDeckFeedback] = useState("");
+  const [drafts, setDrafts] = useState([]);
+  const [draftError, setDraftError] = useState("");
+  const deckRef = useRef(null);
   const normalizedTagFilter = tagFilter.trim().toLocaleLowerCase();
+  const normalizedLibraryQuery = libraryQuery.trim().toLocaleLowerCase();
+  const expandedTerms = expandedSearchTerms.map((term) => term.toLocaleLowerCase());
+  const visibleDrafts = drafts.filter((draft) => {
+    const searchableText = [
+      draft.title,
+      ...(draft.textLayers ?? []).map((layer) => layer.text),
+    ].join(" ").toLocaleLowerCase();
+    return !normalizedLibraryQuery ||
+      searchableText.includes(normalizedLibraryQuery) ||
+      expandedTerms.some((term) => searchableText.includes(term));
+  });
   const visibleFavorites = favorites.filter((item) => {
     const matchesCollection = collectionFilter === ""
       ? true
@@ -25,8 +49,57 @@ export function FavoritesSection({
         : item.collectionIds?.includes(collectionFilter);
     const matchesTag = !normalizedTagFilter ||
       item.tags?.some((tag) => tag.toLocaleLowerCase().includes(normalizedTagFilter));
-    return matchesCollection && matchesTag;
+    const searchableText = [
+      item.title,
+      item.provider,
+      item.captionText,
+      ...(item.tags ?? []),
+    ].join(" ").toLocaleLowerCase();
+    return matchesCollection && matchesTag &&
+      (!normalizedLibraryQuery ||
+        searchableText.includes(normalizedLibraryQuery) ||
+        expandedTerms.some((term) => searchableText.includes(term)));
   });
+  const currentDeckItem = visibleFavorites[deckIndex];
+
+  useEffect(() => {
+    let active = true;
+    readMemeDrafts().then((savedDrafts) => {
+      if (active) setDrafts(savedDrafts.sort((left, right) => right.updatedAt - left.updatedAt));
+    }).catch((cause) => {
+      if (active) {
+        setDraftError(`Local drafts could not be loaded. ${cause instanceof Error ? cause.message : String(cause)}`);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isDeckOpen) return undefined;
+    function onKeyDown(event) {
+      if (["INPUT", "TEXTAREA", "SELECT"].includes(event.target?.tagName)) return;
+      if (event.key === "ArrowRight" || event.key === " ") {
+        event.preventDefault();
+        setDeckIndex((current) => (current + 1) % Math.max(1, visibleFavorites.length));
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        setDeckIndex((current) =>
+          (current - 1 + visibleFavorites.length) % Math.max(1, visibleFavorites.length),
+        );
+      } else if (event.key === "Escape") {
+        setIsDeckOpen(false);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isDeckOpen, visibleFavorites.length]);
+
+  useEffect(() => {
+    if (!visibleFavorites.length) setDeckIndex(0);
+    else setDeckIndex((current) => Math.min(current, visibleFavorites.length - 1));
+  }, [visibleFavorites.length]);
 
   function createCollection(event) {
     event.preventDefault();
@@ -44,6 +117,71 @@ export function FavoritesSection({
       setActionError("Favorite details could not be saved in this browser.");
     } else {
       setActionError("");
+    }
+  }
+
+  async function copyDeckItem() {
+    if (!currentDeckItem) return;
+    setDeckFeedback("Copying GIF…");
+    try {
+      await copyMediaToClipboard(currentDeckItem);
+      setDeckFeedback("GIF copied. Paste it into the target app to check support.");
+    } catch (cause) {
+      setDeckFeedback(`Copy failed. ${cause instanceof Error ? cause.message : String(cause)}`);
+    }
+  }
+
+  async function enterFullscreen() {
+    if (typeof deckRef.current?.requestFullscreen !== "function") {
+      setDeckFeedback("Fullscreen is not supported in this browser.");
+      return;
+    }
+    try {
+      await deckRef.current.requestFullscreen();
+      setDeckFeedback("");
+    } catch (cause) {
+      setDeckFeedback(`Fullscreen could not be opened. ${cause instanceof Error ? cause.message : String(cause)}`);
+    }
+  }
+
+  async function expandLibrarySearch() {
+    const languageModel = globalThis.LanguageModel ?? globalThis.ai?.languageModel;
+    if (!libraryQuery.trim()) {
+      setSearchFeedback("Enter a mood or phrase to expand.");
+      return;
+    }
+    if (typeof languageModel?.create !== "function") {
+      setSearchFeedback("On-device AI search is not available in this browser. Exact title, caption, provider, and tag search still works.");
+      return;
+    }
+    setIsExpandingSearch(true);
+    setSearchFeedback("Finding related local search terms on this device…");
+    let session;
+    try {
+      const options = {
+        expectedInputs: [{ type: "text", languages: ["en"] }],
+        expectedOutputs: [{ type: "text", languages: ["en"] }],
+      };
+      const availability = await languageModel.availability?.(options);
+      if (availability === "unavailable") throw new Error("The on-device language model is unavailable.");
+      session = await languageModel.create(options);
+      const response = await session.prompt(
+        `Suggest up to eight concise related words or short phrases for searching a personal meme library by mood or meaning. Search phrase: "${libraryQuery.trim()}". Return only comma-separated terms.`,
+      );
+      const terms = [...new Set(String(response)
+        .split(/[,\n]+/)
+        .map((term) => term.replace(/^\s*(?:[-*]|\d+[.)])\s*/, "").trim())
+        .filter((term) => term && term.toLocaleLowerCase() !== libraryQuery.trim().toLocaleLowerCase()))]
+        .slice(0, 8);
+      if (!terms.length) throw new Error("The model returned no related search terms.");
+      setExpandedSearchTerms(terms);
+      setSearchFeedback(`Expanded locally with: ${terms.join(", ")}`);
+    } catch (cause) {
+      setExpandedSearchTerms([]);
+      setSearchFeedback(`Search expansion failed. ${cause instanceof Error ? cause.message : String(cause)}`);
+    } finally {
+      session?.destroy?.();
+      setIsExpandingSearch(false);
     }
   }
 
@@ -72,8 +210,29 @@ export function FavoritesSection({
       </form>
       {actionError && <p className="favorites-storage-error" role="alert">{actionError}</p>}
       {collectionsError && <p className="favorites-storage-error" role="status">{collectionsError}</p>}
-      {favorites.length > 0 && (
+      {(favorites.length > 0 || drafts.length > 0) && (
         <div className="favorite-filters">
+          <label>
+            <span>Search your library</span>
+            <input
+              value={libraryQuery}
+              maxLength={100}
+              onChange={(event) => {
+                setLibraryQuery(event.target.value);
+                setExpandedSearchTerms([]);
+                setSearchFeedback("");
+              }}
+              placeholder="Titles, captions, providers, tags"
+            />
+          </label>
+          <button
+            className="meme-editor-secondary"
+            type="button"
+            onClick={expandLibrarySearch}
+            disabled={isExpandingSearch}
+          >
+            {isExpandingSearch ? "Expanding…" : "Search by meaning"}
+          </button>
           <label>
             <span>Collection</span>
             <select value={collectionFilter} onChange={(event) => setCollectionFilter(event.target.value)}>
@@ -95,6 +254,7 @@ export function FavoritesSection({
           <span>{visibleFavorites.length} shown</span>
         </div>
       )}
+      {searchFeedback && <p className="meme-editor-copy-feedback" role="status">{searchFeedback}</p>}
       {favorites.length ? (
         visibleFavorites.length ? (
           <div className="mosaic-grid">
@@ -147,6 +307,83 @@ export function FavoritesSection({
         <div className="empty-state favorites-empty">
           <p>You haven’t saved any GIFs yet.</p>
           <a href="#/">Search for GIFs to start your collection <span aria-hidden="true">↗</span></a>
+        </div>
+      )}
+      {draftError && <p className="favorites-storage-error" role="status">{draftError}</p>}
+      {drafts.length > 0 && (
+        <section className="local-drafts-library" aria-labelledby="local-drafts-heading">
+          <header>
+            <div>
+              <p className="eyebrow dark-eyebrow">STORED ON THIS DEVICE</p>
+              <h3 id="local-drafts-heading">Meme drafts</h3>
+            </div>
+            <span>{visibleDrafts.length} shown</span>
+          </header>
+          {visibleDrafts.length ? visibleDrafts.map((draft) => (
+            <article key={draft.id}>
+              <div>
+                <strong>{draft.title}</strong>
+                <span>{(draft.textLayers ?? []).map((layer) => layer.text).filter(Boolean).join(" · ") || "No captions yet"}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => onOpenDraft?.(draft)}
+                disabled={!onOpenDraft}
+              >
+                Continue editing
+              </button>
+            </article>
+          )) : <p>No local drafts match this search.</p>}
+        </section>
+      )}
+      {visibleFavorites.length > 0 && (
+        <button
+          className="meme-editor-secondary favorites-deck-launch"
+          type="button"
+          onClick={() => {
+            setDeckIndex(0);
+            setDeckFeedback("");
+            setIsDeckOpen(true);
+          }}
+        >
+          Open reaction deck ({visibleFavorites.length})
+        </button>
+      )}
+      {isDeckOpen && currentDeckItem && (
+        <div className="reaction-deck-backdrop">
+          <section
+            ref={deckRef}
+            className="reaction-deck"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Reaction GIF deck"
+          >
+            <header>
+              <span>{deckIndex + 1} / {visibleFavorites.length} · {currentDeckItem.title}</span>
+              <button type="button" onClick={() => setIsDeckOpen(false)} aria-label="Close reaction deck">×</button>
+            </header>
+            <img src={currentDeckItem.imageUrl} alt={currentDeckItem.title} />
+            <nav aria-label="Reaction deck controls">
+              <button
+                type="button"
+                onClick={() => setDeckIndex((current) =>
+                  (current - 1 + visibleFavorites.length) % visibleFavorites.length,
+                )}
+              >
+                ← Previous
+              </button>
+              <button type="button" onClick={copyDeckItem}>Copy GIF</button>
+              <button type="button" onClick={enterFullscreen}>Fullscreen</button>
+              <button
+                type="button"
+                onClick={() => setDeckIndex((current) => (current + 1) % visibleFavorites.length)}
+              >
+                Next →
+              </button>
+            </nav>
+            <p>Use ← / → or Space to switch reactions. Escape closes the deck.</p>
+            {deckFeedback && <p role="status">{deckFeedback}</p>}
+          </section>
         </div>
       )}
     </section>

@@ -43,7 +43,8 @@ function MemeApp() {
     copyJson, submitSearch, chooseSearch, toggleProvider, runApi, clearLogs,
     favorites, favoritesError, isFavorite, toggleFavorite,
     collections, collectionsError, createCollection, updateFavorite,
-    editorItem, openEditor, closeEditor,
+    editorItem, editorFile, editorDraft, fileOpenError,
+    openEditor, openDraftInEditor, closeEditor,
     recentSearches, recentSearchError, clearRecentSearches,
     resultsLayout, setResultsLayout,
     similarityState, findSimilar, clearSimilarResults,
@@ -134,6 +135,7 @@ function MemeApp() {
         </section>
 
         <section className="content-section">
+          {fileOpenError && <p className="meme-editor-error" role="alert">{fileOpenError}</p>}
           {favoritesError && (
             <p className="favorites-storage-error" role="status">{favoritesError}</p>
           )}
@@ -160,6 +162,8 @@ function MemeApp() {
           ) : page === "editor" ? (
             <MemeEditor
               item={editorItem}
+              initialFile={editorFile}
+              initialDraft={editorDraft}
               onClose={closeEditor}
               isFavorite={isFavorite}
               onToggleFavorite={toggleFavorite}
@@ -185,6 +189,7 @@ function MemeApp() {
                 onToggleFavorite={toggleFavorite}
                 onEdit={openEditor}
                 onFindSimilar={findSimilar}
+                onOpenDraft={openDraftInEditor}
               />
             </>
           ) : (

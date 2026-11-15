@@ -15,3 +15,22 @@ if (import.meta.env.PROD && "serviceWorker" in navigator) {
       console.error("The offline app worker could not be registered.", cause);
     });
 }
+
+if (typeof window.launchQueue?.setConsumer === "function") {
+  window.launchQueue.setConsumer(async (launchParams) => {
+    const fileHandle = launchParams.files?.[0];
+    if (!fileHandle) return;
+    try {
+      const file = await fileHandle.getFile();
+      window.__memesPendingFile = file;
+      window.dispatchEvent(new CustomEvent("memes:file-open", { detail: file }));
+    } catch (cause) {
+      console.error("The selected file could not be opened in Memes.", cause);
+      const message = cause instanceof Error ? cause.message : String(cause);
+      window.__memesFileOpenError = message;
+      window.dispatchEvent(new CustomEvent("memes:file-open-error", {
+        detail: message,
+      }));
+    }
+  });
+}

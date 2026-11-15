@@ -1,5 +1,8 @@
 const MAX_PROJECT_BYTES = 30 * 1024 * 1024;
-const SUPPORTED_IMAGE_TYPES = new Set(["image/gif", "image/jpeg", "image/png", "image/webp"]);
+const SUPPORTED_MEDIA_TYPES = new Set([
+  "image/gif", "image/jpeg", "image/png", "image/webp",
+  "video/mp4", "video/webm", "video/ogg", "video/quicktime",
+]);
 
 function blobToDataUrl(blob) {
   return new Promise((resolve, reject) => {
@@ -11,9 +14,9 @@ function blobToDataUrl(blob) {
 }
 
 function dataUrlToBlob(dataUrl) {
-  const match = /^data:(image\/(?:gif|jpeg|png|webp));base64,([A-Za-z0-9+/=\r\n]+)$/.exec(dataUrl);
-  if (!match || !SUPPORTED_IMAGE_TYPES.has(match[1])) {
-    throw new Error("The project does not contain a supported image.");
+  const match = /^data:(image\/(?:gif|jpeg|png|webp)|video\/(?:mp4|webm|ogg|quicktime));base64,([A-Za-z0-9+/=\r\n]+)$/.exec(dataUrl);
+  if (!match || !SUPPORTED_MEDIA_TYPES.has(match[1])) {
+    throw new Error("The project does not contain supported media.");
   }
   const binary = atob(match[2].replace(/\s/g, ""));
   if (binary.length > MAX_PROJECT_BYTES) throw new Error("The project image is too large to import.");
@@ -35,6 +38,13 @@ function normalizeSettings(settings) {
     if (!layer || typeof layer.id !== "string" || typeof layer.text !== "string") {
       throw new Error("The project contains an invalid text layer.");
     }
+    const keyframes = Array.isArray(layer.keyframes)
+      ? layer.keyframes.slice(0, 60).map((keyframe) => ({
+          timeMs: boundedNumber(keyframe?.timeMs, 0, 0, 3_600_000),
+          x: boundedNumber(keyframe?.x, 0.5, 0, 1),
+          y: boundedNumber(keyframe?.y, 0.5, 0, 1),
+        }))
+      : [];
     return {
       ...layer,
       id: layer.id.slice(0, 100),
@@ -45,6 +55,7 @@ function normalizeSettings(settings) {
       fontSizePercent: boundedNumber(layer.fontSizePercent, undefined, 0, 30),
       startMs: boundedNumber(layer.startMs, 0, 0, 3_600_000),
       endMs: boundedNumber(layer.endMs, 3_600_000, 0, 3_600_000),
+      ...(keyframes.length ? { keyframes } : {}),
     };
   });
   const strokes = settings.strokes.map((stroke) => {
@@ -94,12 +105,13 @@ function normalizeSettings(settings) {
       ? Number(settings.gifColorCount)
       : 256,
     gifDithering: Boolean(settings.gifDithering),
+    videoOutputFormat: settings.videoOutputFormat === "webm" ? "webm" : "gif",
   };
 }
 
 export async function createMemeProject(sourceBlob, settings) {
-  if (!(sourceBlob instanceof Blob) || !SUPPORTED_IMAGE_TYPES.has(sourceBlob.type)) {
-    throw new Error("Choose a supported image before exporting a project.");
+  if (!(sourceBlob instanceof Blob) || !SUPPORTED_MEDIA_TYPES.has(sourceBlob.type)) {
+    throw new Error("Choose supported image, GIF, or video media before exporting a project.");
   }
   if (sourceBlob.size > MAX_PROJECT_BYTES) throw new Error("The project image is too large to export.");
   const payload = {

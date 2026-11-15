@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { copyAnimatedGifToClipboard } from "../services/clipboard.js";
+import { createExportPack } from "../services/exportPack.js";
 import { deleteMemeDraft, readMemeDrafts, saveMemeDraft } from "../services/favorites.js";
-import { createCaptionedMedia, drawMemeOverlays, inspectMedia } from "../services/memeEditor.js";
+import {
+  createCaptionedMedia,
+  drawMemeOverlays,
+  getVideoOutputDimensions,
+  inspectMedia,
+  supportsWebMExport,
+} from "../services/memeEditor.js";
 import { createMemeProject, readMemeProject } from "../services/memeProject.js";
 
 const EXPORT_PRESETS = {
@@ -18,8 +25,38 @@ function createGeneratedFavoriteId() {
   return `edited-${uniqueId}`;
 }
 
+function getMediaDimensions(media) {
+  return {
+    width: media?.videoWidth || media?.naturalWidth || 0,
+    height: media?.videoHeight || media?.naturalHeight || 0,
+  };
+}
+
+function seekVideoElement(video, timeSeconds) {
+  if (Math.abs(video.currentTime - timeSeconds) < 0.001) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      video.removeEventListener("seeked", onSeeked);
+      video.removeEventListener("error", onError);
+    };
+    const onSeeked = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error("The video could not seek to a frame for face tracking."));
+    };
+    video.addEventListener("seeked", onSeeked, { once: true });
+    video.addEventListener("error", onError, { once: true });
+    video.currentTime = timeSeconds;
+  });
+}
+
 export function MemeEditor({
   item,
+  initialFile = null,
+  initialDraft = null,
   onClose,
   isFavorite,
   onToggleFavorite,
@@ -43,6 +80,7 @@ export function MemeEditor({
   const [previewTimeMs, setPreviewTimeMs] = useState(0);
   const [mediaInfoError, setMediaInfoError] = useState("");
   const [outputPreset, setOutputPreset] = useState("original");
+  const [videoOutputFormat, setVideoOutputFormat] = useState("gif");
   const [strokes, setStrokes] = useState([]);
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawingColor, setDrawingColor] = useState("#ff765f");
@@ -54,12 +92,14 @@ export function MemeEditor({
     flipX: false,
   });
   const [isExporting, setIsExporting] = useState(false);
+  const [isExportingPack, setIsExportingPack] = useState(false);
   const [isCopying, setIsCopying] = useState(false);
   const [exportError, setExportError] = useState("");
   const [copyFeedback, setCopyFeedback] = useState(null);
   const [outputUrl, setOutputUrl] = useState("");
   const [outputBlob, setOutputBlob] = useState(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [isPreviewPlaying, setIsPreviewPlaying] = useState(true);
   const [generatedFavoriteItem, setGeneratedFavoriteItem] = useState(null);
   const [isSavingFavorite, setIsSavingFavorite] = useState(false);
   const [favoriteActionError, setFavoriteActionError] = useState("");
@@ -86,9 +126,15 @@ export function MemeEditor({
   const sourceUrl = uploadedUrl || item?.imageUrl || "";
   const selectedText = textLayers.find((layer) => layer.id === selectedTextId);
   const outputDimensions = EXPORT_PRESETS[outputPreset];
-  const selectedDurationMs = mediaInfo?.isGif
+  const displayOutputDimensions = outputDimensions ?? (mediaInfo?.isVideo
+    ? getVideoOutputDimensions(mediaInfo.width, mediaInfo.height)
+    : null);
+  const selectedDurationMs = mediaInfo?.isGif || mediaInfo?.isVideo
     ? Math.max(20, timeline.endMs - timeline.startMs)
     : 0;
+  const selectedExportLabel = mediaInfo?.isVideo
+    ? videoOutputFormat === "webm" ? "WebM" : "GIF"
+    : "image";
   const formatTime = (milliseconds) => `${(milliseconds / 1000).toFixed(1)}s`;
 
   useEffect(() => {
@@ -114,9 +160,12 @@ export function MemeEditor({
       if (!active) return;
       setMediaInfo(info);
       setTimeline((current) => {
-        const endMs = current.endMs
-          ? Math.min(current.endMs, info.durationMs)
+        const durationMs = info.isVideo
+          ? Math.min(info.durationMs, 10_000)
           : info.durationMs;
+        const endMs = current.endMs
+          ? Math.min(current.endMs, durationMs)
+          : durationMs;
         return {
           ...current,
           startMs: Math.min(current.startMs, Math.max(0, endMs - 20)),
@@ -147,6 +196,23 @@ export function MemeEditor({
     return () => URL.revokeObjectURL(uploadedUrl);
   }, [uploadedUrl]);
 
+  useEffect(() => {
+    if (!initialFile) return;
+    setExportError("");
+    if (
+      initialFile.name?.toLocaleLowerCase().endsWith(".meme") ||
+      initialFile.type === "application/vnd.memes.project+json"
+    ) {
+      void importProject(initialFile);
+    } else {
+      useUploadedFile(initialFile);
+    }
+  }, [initialFile]);
+
+  useEffect(() => {
+    if (initialDraft) loadDraft(initialDraft);
+  }, [initialDraft]);
+
   useEffect(() => () => {
     variantItems.forEach((variant) => URL.revokeObjectURL(variant.url));
   }, [variantItems]);
@@ -156,49 +222,56 @@ export function MemeEditor({
 
     function renderCaptionPreview() {
       const preview = previewRef.current;
-      const image = previewImageRef.current;
+      const media = previewImageRef.current;
       const canvas = captionCanvasRef.current;
-      if (!preview || !image?.naturalWidth || !image.naturalHeight || !canvas) return;
+      const { width, height } = getMediaDimensions(media);
+      if (!preview || !width || !height || !canvas) return;
 
       const pixelRatio = globalThis.devicePixelRatio || 1;
-      canvas.width = Math.max(1, Math.round(image.offsetWidth * pixelRatio));
-      canvas.height = Math.max(1, Math.round(image.offsetHeight * pixelRatio));
-      canvas.style.left = `${image.offsetLeft}px`;
-      canvas.style.top = `${image.offsetTop}px`;
-      canvas.style.width = `${image.offsetWidth}px`;
-      canvas.style.height = `${image.offsetHeight}px`;
+      canvas.width = Math.max(1, Math.round(media.offsetWidth * pixelRatio));
+      canvas.height = Math.max(1, Math.round(media.offsetHeight * pixelRatio));
+      canvas.style.left = `${media.offsetLeft}px`;
+      canvas.style.top = `${media.offsetTop}px`;
+      canvas.style.width = `${media.offsetWidth}px`;
+      canvas.style.height = `${media.offsetHeight}px`;
 
       const context = canvas.getContext("2d");
       if (!context) return;
-      context.scale(canvas.width / image.naturalWidth, canvas.height / image.naturalHeight);
+      context.scale(canvas.width / width, canvas.height / height);
       drawMemeOverlays(
         context,
         textLayers,
         strokes,
-        image.naturalWidth,
-        image.naturalHeight,
+        width,
+        height,
         fontSizePercent,
-        previewTimeMs,
+        mediaInfo?.isVideo
+          ? Math.max(0, media.currentTime * 1000 - timeline.startMs)
+          : previewTimeMs,
       );
     }
 
-    const image = previewImageRef.current;
-    image?.addEventListener("load", renderCaptionPreview);
+    const media = previewImageRef.current;
+    media?.addEventListener("load", renderCaptionPreview);
+    media?.addEventListener("loadeddata", renderCaptionPreview);
+    media?.addEventListener("timeupdate", renderCaptionPreview);
     renderCaptionPreview();
 
     const observer = typeof globalThis.ResizeObserver === "function"
       ? new globalThis.ResizeObserver(renderCaptionPreview)
       : null;
     if (previewRef.current) observer?.observe(previewRef.current);
-    if (image) observer?.observe(image);
+    if (media) observer?.observe(media);
     if (!observer) globalThis.addEventListener("resize", renderCaptionPreview);
 
     return () => {
-      image?.removeEventListener("load", renderCaptionPreview);
+      media?.removeEventListener("load", renderCaptionPreview);
+      media?.removeEventListener("loadeddata", renderCaptionPreview);
+      media?.removeEventListener("timeupdate", renderCaptionPreview);
       observer?.disconnect();
       if (!observer) globalThis.removeEventListener("resize", renderCaptionPreview);
     };
-  }, [fontSizePercent, outputUrl, previewTimeMs, sourceUrl, strokes, textLayers]);
+  }, [fontSizePercent, mediaInfo?.isVideo, outputUrl, previewTimeMs, sourceUrl, strokes, textLayers, timeline.startMs]);
 
   function invalidateOutput() {
     setOutputUrl("");
@@ -222,6 +295,44 @@ export function MemeEditor({
   function updateTransform(key, value) {
     setTransform((current) => ({ ...current, [key]: value }));
     invalidateOutput();
+  }
+
+  function addPositionKeyframe() {
+    if (!selectedText) return;
+    const timeMs = Math.max(0, Math.min(selectedDurationMs, previewTimeMs));
+    const currentKeyframes = selectedText.keyframes ?? [];
+    if (currentKeyframes.length >= 60 && !currentKeyframes.some((entry) => entry.timeMs === timeMs)) {
+      setFaceFeedback("This layer already has the maximum of 60 position keyframes.");
+      return;
+    }
+    const keyframe = {
+      timeMs,
+      x: selectedText.x ?? 0.5,
+      y: selectedText.y ?? (selectedText.position === "top" ? 0.08 : 0.92),
+    };
+    setTextLayers((current) => current.map((layer) => layer.id === selectedText.id
+      ? {
+          ...layer,
+          position: "custom",
+          keyframes: [
+            ...(layer.keyframes ?? []).filter((entry) => entry.timeMs !== timeMs),
+            keyframe,
+          ].sort((left, right) => left.timeMs - right.timeMs),
+        }
+      : layer));
+    invalidateOutput();
+  }
+
+  function toggleVideoPreview() {
+    const video = previewImageRef.current;
+    if (!mediaInfo?.isVideo || !video) return;
+    if (video.paused) {
+      video.play().catch((cause) => {
+        setMediaInfoError(`Video preview could not play. ${cause instanceof Error ? cause.message : String(cause)}`);
+      });
+    } else {
+      video.pause();
+    }
   }
 
   function addTextLayer(text = "NEW TEXT", kind = "text") {
@@ -263,6 +374,7 @@ export function MemeEditor({
 
   function startPreviewPointer(event) {
     if (outputUrl) return;
+    if (event.target === previewImageRef.current && mediaInfo?.isVideo) return;
     const point = imagePoint(event);
     if (!point) return;
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -281,15 +393,21 @@ export function MemeEditor({
 
     const nearestLayer = textLayers
       .filter((layer) => layer.text.trim())
-      .map((layer) => ({
-        layer,
-        distance: Math.hypot(
-          (point.x - (layer.x ?? 0.5)) * (previewImageRef.current?.naturalWidth ?? 1),
-          (point.y - (layer.y ?? (layer.position === "top" ? 0.08 : 0.92))) *
-            (previewImageRef.current?.naturalHeight ?? 1),
-        ),
-      }))
-      .filter(({ distance }) => distance < Math.max(45, (previewImageRef.current?.naturalWidth ?? 1) * 0.12))
+      .map((layer) => {
+        const { width, height } = getMediaDimensions(previewImageRef.current);
+        return {
+          layer,
+          distance: Math.hypot(
+            (point.x - (layer.x ?? 0.5)) * (width || 1),
+            (point.y - (layer.y ?? (layer.position === "top" ? 0.08 : 0.92))) *
+              (height || 1),
+          ),
+        };
+      })
+      .filter(({ distance }) => distance < Math.max(
+        45,
+        (getMediaDimensions(previewImageRef.current).width || 1) * 0.12,
+      ))
       .sort((left, right) => left.distance - right.distance)[0]?.layer;
     if (!nearestLayer) return;
     setSelectedTextId(nearestLayer.id);
@@ -322,19 +440,23 @@ export function MemeEditor({
 
   function useUploadedFile(file) {
     if (!file) return;
-    const supportedTypes = new Set(["image/gif", "image/jpeg", "image/png", "image/webp"]);
+    const supportedTypes = new Set([
+      "image/gif", "image/jpeg", "image/png", "image/webp",
+      "video/mp4", "video/webm", "video/ogg", "video/quicktime",
+    ]);
     if (!supportedTypes.has(file.type)) {
-      setExportError("Choose a GIF, JPEG, PNG, or WebP image.");
+      setExportError("Choose a GIF, JPEG, PNG, WebP, MP4, WebM, Ogg, or QuickTime video.");
       return;
     }
     if (file.size > 20 * 1024 * 1024) {
-      setExportError("This image is too large to edit in the browser.");
+      setExportError("This media file is too large to edit in the browser (20 MB maximum).");
       return;
     }
 
     setUploadedBlob(file);
     setUploadedUrl(URL.createObjectURL(file));
     setTimeline({ startMs: 0, endMs: 0, speed: 1, reverse: false });
+    setVideoOutputFormat("gif");
     setVariantItems([]);
     setOutputUrl("");
     setOutputBlob(null);
@@ -368,6 +490,7 @@ export function MemeEditor({
         outputPreset,
         gifColorCount,
         gifDithering,
+        videoOutputFormat,
         updatedAt: Date.now(),
       };
       await saveMemeDraft(draft);
@@ -399,6 +522,7 @@ export function MemeEditor({
         outputPreset,
         gifColorCount,
         gifDithering,
+        videoOutputFormat,
       });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -430,6 +554,7 @@ export function MemeEditor({
         ? Number(settings.gifColorCount)
         : 256);
       setGifDithering(Boolean(settings.gifDithering));
+      setVideoOutputFormat(settings.videoOutputFormat === "webm" ? "webm" : "gif");
       invalidateOutput();
       setProjectFeedback(`Loaded project from ${file.name}.`);
     } catch (cause) {
@@ -438,6 +563,11 @@ export function MemeEditor({
   }
 
   async function generateCaptionIdeas() {
+    const media = previewImageRef.current;
+    if (!media) {
+      setCopilotFeedback("Load an image or video before asking for visual caption ideas.");
+      return;
+    }
     const languageModel = globalThis.LanguageModel ?? globalThis.ai?.languageModel;
     if (typeof languageModel?.create !== "function") {
       setCopilotFeedback("This browser does not expose its built-in on-device AI. Your text stays local; you can enter caption variants below.");
@@ -447,14 +577,28 @@ export function MemeEditor({
     setCopilotFeedback("Generating caption ideas on this device…");
     let session;
     try {
-      const availability = await languageModel.availability?.();
+      const modelOptions = {
+        expectedInputs: [
+          { type: "text", languages: ["en"] },
+          { type: "image" },
+        ],
+        expectedOutputs: [{ type: "text", languages: ["en"] }],
+      };
+      const availability = await languageModel.availability?.(modelOptions);
       if (availability === "unavailable") {
-        throw new Error("The browser's on-device model is unavailable.");
+        throw new Error("The browser's on-device model does not support image input here.");
       }
-      session = await languageModel.create();
-      const ideaText = await session.prompt(
-        `Suggest four short, distinct meme captions for this idea: "${copilotPrompt.trim() || selectedText?.text || item?.title || "a funny reaction"}". Return only one caption per line, without numbering.`,
-      );
+      session = await languageModel.create(modelOptions);
+      const ideaText = await session.prompt([{
+        role: "user",
+        content: [
+          {
+            type: "text",
+            value: `Look at this image or video frame and suggest four short, distinct meme captions. Use this optional idea or mood as extra context: "${copilotPrompt.trim() || selectedText?.text || item?.title || "a funny reaction"}". Return only one caption per line, without numbering.`,
+          },
+          { type: "image", value: media },
+        ],
+      }]);
       const suggestions = String(ideaText)
         .split(/\n+/)
         .map((line) => line.replace(/^\s*(?:[-*]|\d+[.)])\s*/, "").trim())
@@ -462,7 +606,7 @@ export function MemeEditor({
         .slice(0, 4);
       if (!suggestions.length) throw new Error("The on-device model returned no caption ideas.");
       setVariantCaptions(suggestions.join("\n"));
-      setCopilotFeedback("Caption ideas generated on-device. Review them before generating variants.");
+      setCopilotFeedback("Captions generated from the preview on-device. Media was not uploaded; review before generating variants.");
     } catch (cause) {
       setCopilotFeedback(`On-device caption ideas failed. ${cause instanceof Error ? cause.message : String(cause)}`);
     } finally {
@@ -503,6 +647,7 @@ export function MemeEditor({
             : {}),
           colorCount: gifColorCount,
           dither: gifDithering,
+          outputFormat: videoOutputFormat,
         });
         generated.push({ caption, blob, url: URL.createObjectURL(blob) });
       }
@@ -521,6 +666,7 @@ export function MemeEditor({
     setGeneratedFavoriteItem(variant.blob.type === "image/gif" ? {
       id: createGeneratedFavoriteId(),
       title: `Edited ${item?.title || "GIF"}`,
+      captionText: variant.caption,
       imageUrl: item?.imageUrl || "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=",
       provider: "meme-editor",
       kind: "gif",
@@ -536,56 +682,97 @@ export function MemeEditor({
       setFaceFeedback("Face detection is not available in this browser. Drag the selected layer to position it manually.");
       return;
     }
-    if (!image?.naturalWidth || !selectedText) {
-      setFaceFeedback("Load an image and select a text or sticker layer first.");
+    const { width, height } = getMediaDimensions(image);
+    if (!width || !selectedText) {
+      setFaceFeedback("Load media and select a text or sticker layer first.");
       return;
     }
     setIsDetectingFaces(true);
     setFaceFeedback("");
+    const video = mediaInfo?.isVideo ? image : null;
+    const wasPlaying = video ? !video.paused : false;
+    const originalTime = video?.currentTime ?? 0;
     try {
       const detector = new FaceDetectorApi({ fastMode: true, maxDetectedFaces: 10 });
-      const faces = await detector.detect(image);
-      if (!faces.length) {
-        setFaceFeedback("No faces found. Drag the layer manually or try another frame.");
-        return;
-      }
-
+      if (video) video.pause();
+      const sampleCount = video
+        ? Math.min(11, Math.max(2, Math.ceil(selectedDurationMs / 1000) + 1))
+        : 1;
+      const trackedPositions = [];
       const candidates = [
         { x: 0.5, y: 0.12 },
         { x: 0.5, y: 0.88 },
         { x: 0.5, y: 0.5 },
       ];
-      const scoredCandidates = candidates.map((candidate) => {
-        const textBox = {
-          left: candidate.x - 0.42,
-          right: candidate.x + 0.42,
-          top: candidate.y - 0.08,
-          bottom: candidate.y + 0.08,
-        };
-        const overlap = faces.reduce((score, face) => {
-          const box = face.boundingBox;
-          const faceBox = {
-            left: box.x / image.naturalWidth,
-            right: (box.x + box.width) / image.naturalWidth,
-            top: box.y / image.naturalHeight,
-            bottom: (box.y + box.height) / image.naturalHeight,
+
+      for (let index = 0; index < sampleCount; index += 1) {
+        const timeMs = sampleCount === 1
+          ? 0
+          : Math.min(
+              Math.max(0, selectedDurationMs - 1),
+              Math.round((selectedDurationMs * index) / (sampleCount - 1)),
+            );
+        if (video) {
+          await seekVideoElement(video, (timeline.startMs + timeMs) / 1000);
+        }
+        const faces = await detector.detect(image);
+        if (!faces.length) continue;
+
+        const placement = candidates.map((candidate) => {
+          const textBox = {
+            left: candidate.x - 0.42,
+            right: candidate.x + 0.42,
+            top: candidate.y - 0.08,
+            bottom: candidate.y + 0.08,
           };
-          const width = Math.max(0, Math.min(textBox.right, faceBox.right) - Math.max(textBox.left, faceBox.left));
-          const height = Math.max(0, Math.min(textBox.bottom, faceBox.bottom) - Math.max(textBox.top, faceBox.top));
-          return score + width * height;
-        }, 0);
-        return { ...candidate, overlap };
-      }).sort((left, right) => left.overlap - right.overlap);
-      const placement = scoredCandidates[0];
+          const overlap = faces.reduce((score, face) => {
+            const box = face.boundingBox;
+            const faceBox = {
+              left: box.x / width,
+              right: (box.x + box.width) / width,
+              top: box.y / height,
+              bottom: (box.y + box.height) / height,
+            };
+            const overlapWidth = Math.max(
+              0,
+              Math.min(textBox.right, faceBox.right) - Math.max(textBox.left, faceBox.left),
+            );
+            const overlapHeight = Math.max(
+              0,
+              Math.min(textBox.bottom, faceBox.bottom) - Math.max(textBox.top, faceBox.top),
+            );
+            return score + overlapWidth * overlapHeight;
+          }, 0);
+          return { ...candidate, overlap };
+        }).sort((left, right) => left.overlap - right.overlap)[0];
+        trackedPositions.push({ timeMs, x: placement.x, y: placement.y });
+      }
+
+      if (!trackedPositions.length) {
+        setFaceFeedback("No faces found. Drag the layer manually or try another frame.");
+        return;
+      }
+
       updateTextLayer(selectedText.id, {
-        x: placement.x,
-        y: placement.y,
+        x: trackedPositions[0].x,
+        y: trackedPositions[0].y,
         position: "custom",
+        ...(video ? { keyframes: trackedPositions } : {}),
       });
-      setFaceFeedback("Suggested a low-overlap position using face detection on this device.");
+      setFaceFeedback(video
+        ? `Tracked a face-safe caption position across ${trackedPositions.length} sampled video frames on this device.`
+        : "Suggested a low-overlap position using face detection on this device.");
     } catch (cause) {
       setFaceFeedback(`Face detection failed. ${cause instanceof Error ? cause.message : String(cause)}`);
     } finally {
+      if (video) {
+        try {
+          await seekVideoElement(video, originalTime);
+          if (wasPlaying) await video.play();
+        } catch (cause) {
+          setFaceFeedback(`Face tracking finished, but video preview could not be restored. ${cause instanceof Error ? cause.message : String(cause)}`);
+        }
+      }
       setIsDetectingFaces(false);
     }
   }
@@ -602,6 +789,7 @@ export function MemeEditor({
     setOutputPreset(draft.outputPreset ?? "original");
     setGifColorCount(draft.gifColorCount);
     setGifDithering(draft.gifDithering);
+    setVideoOutputFormat(draft.videoOutputFormat === "webm" ? "webm" : "gif");
     setOutputUrl("");
     setOutputBlob(null);
     setVariantItems([]);
@@ -645,12 +833,14 @@ export function MemeEditor({
           : {}),
         colorCount: gifColorCount,
         dither: gifDithering,
+        outputFormat: videoOutputFormat,
       });
       setOutputUrl(URL.createObjectURL(blob));
       setOutputBlob(blob);
       setGeneratedFavoriteItem(blob.type === "image/gif" ? {
         id: createGeneratedFavoriteId(),
         title: `Edited ${item?.title || "GIF"}`,
+        captionText: textLayers.map((layer) => layer.text.trim()).filter(Boolean).join(" "),
         imageUrl: item?.imageUrl || "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=",
         provider: "meme-editor",
         kind: "gif",
@@ -661,6 +851,80 @@ export function MemeEditor({
       setIsPreviewOpen(false);
     } finally {
       setIsExporting(false);
+    }
+  }
+
+  async function exportPlatformPack() {
+    setIsExportingPack(true);
+    setOutputActionFeedback("Rendering platform exports…");
+    const entries = [];
+    try {
+      const sourceBlob = await getSourceBlob();
+      const commonSettings = {
+        textLayers,
+        strokes,
+        fontSizePercent,
+        transform,
+        trimStartMs: timeline.startMs,
+        trimEndMs: timeline.endMs,
+        speed: timeline.speed,
+        reverse: timeline.reverse,
+        colorCount: gifColorCount,
+        dither: gifDithering,
+        outputFormat: videoOutputFormat,
+      };
+      const presets = [
+        ["square", 512, 512],
+        ["landscape", 640, 480],
+        ["story", 540, 960],
+      ];
+      const outputDetails = [];
+      for (const [index, [name, width, height]] of presets.entries()) {
+        setOutputActionFeedback(`Rendering ${name} export (${index + 1} of ${presets.length})…`);
+        const blob = await createCaptionedMedia(sourceBlob, {
+          ...commonSettings,
+          outputWidth: width,
+          outputHeight: height,
+        });
+        const extension = blob.type === "image/gif"
+          ? "gif"
+          : blob.type === "video/webm"
+            ? "webm"
+            : "png";
+        const filename = `meme-${name}.${extension}`;
+        entries.push({ name: filename, blob });
+        outputDetails.push({ filename, width, height, type: blob.type, bytes: blob.size });
+      }
+
+      const projectBlob = await createMemeProject(sourceBlob, {
+        ...commonSettings,
+        timeline,
+        outputPreset,
+        gifColorCount,
+        gifDithering,
+        videoOutputFormat,
+      });
+      entries.push({ name: "meme-project.meme", blob: projectBlob });
+      entries.push({
+        name: "export-manifest.json",
+        blob: new Blob([JSON.stringify({
+          format: "memes-platform-export",
+          generatedAt: new Date().toISOString(),
+          outputs: outputDetails,
+        }, null, 2)], { type: "application/json" }),
+      });
+      const pack = await createExportPack(entries);
+      const url = URL.createObjectURL(pack);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "memes-platform-pack.zip";
+      link.click();
+      globalThis.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setOutputActionFeedback("Platform pack downloaded with square, landscape, story, and editable project files.");
+    } catch (cause) {
+      setOutputActionFeedback(`Platform pack could not be created. ${cause instanceof Error ? cause.message : String(cause)}`);
+    } finally {
+      setIsExportingPack(false);
     }
   }
 
@@ -684,7 +948,11 @@ export function MemeEditor({
 
   function downloadMeme() {
     if (!outputBlob) return;
-    const extension = outputBlob.type === "image/gif" ? "gif" : "png";
+    const extension = outputBlob.type === "image/gif"
+      ? "gif"
+      : outputBlob.type === "video/webm"
+        ? "webm"
+        : "png";
     const url = URL.createObjectURL(outputBlob);
     const link = document.createElement("a");
     link.href = url;
@@ -696,7 +964,11 @@ export function MemeEditor({
 
   async function shareMeme() {
     if (!outputBlob) return;
-    const extension = outputBlob.type === "image/gif" ? "gif" : "png";
+    const extension = outputBlob.type === "image/gif"
+      ? "gif"
+      : outputBlob.type === "video/webm"
+        ? "webm"
+        : "png";
     const file = new File([outputBlob], `meme.${extension}`, { type: outputBlob.type });
     const shareData = { files: [file], title: "My meme" };
     if (typeof navigator.share !== "function" ||
@@ -734,12 +1006,12 @@ export function MemeEditor({
   if (!item && !uploadedBlob) {
     return (
       <section className="meme-editor-empty">
-        <p>Open the editor from a GIF card or upload an image to start making a meme.</p>
+        <p>Open the editor from a GIF card or upload an image, GIF, or short video.</p>
         <label className="meme-editor-upload">
-          <span>Upload an image or GIF</span>
+          <span>Upload image, GIF, or video</span>
           <input
             type="file"
-            accept="image/gif,image/jpeg,image/png,image/webp"
+            accept="image/gif,image/jpeg,image/png,image/webp,video/mp4,video/webm,video/ogg,video/quicktime"
             onChange={(event) => {
               useUploadedFile(event.target.files[0]);
               event.target.value = "";
@@ -819,9 +1091,9 @@ export function MemeEditor({
           onPointerCancel={endPreviewPointer}
           onPaste={(event) => {
             const file = Array.from(event.clipboardData.files).find((entry) =>
-              entry.type.startsWith("image/"),
+              entry.type.startsWith("image/") || entry.type.startsWith("video/"),
             ) ?? Array.from(event.clipboardData.items)
-              .find((entry) => entry.type.startsWith("image/"))
+              .find((entry) => entry.type.startsWith("image/") || entry.type.startsWith("video/"))
               ?.getAsFile();
             if (file) {
               event.preventDefault();
@@ -829,20 +1101,64 @@ export function MemeEditor({
             }
           }}
           tabIndex={0}
-          aria-label="Meme preview. Drag text to reposition it, or drop and paste an image here."
+          aria-label="Meme preview. Drag text to reposition it, or drop and paste media here."
         >
-          <img
-            ref={previewImageRef}
-            src={outputUrl || sourceUrl}
-            alt={item?.title || "Meme preview"}
-            style={{
-              filter: `brightness(${transform.brightness}%) contrast(${transform.contrast}%)`,
-              transform: `scale(${transform.zoom})${transform.flipX ? " scaleX(-1)" : ""}`,
-              ...(outputDimensions
-                ? { width: "100%", height: "100%", maxHeight: "none", objectFit: "cover" }
-                : {}),
-            }}
-          />
+          {outputBlob?.type === "video/webm" && outputUrl ? (
+            <video
+              className="meme-editor-generated-video"
+              src={outputUrl}
+              aria-label="Generated WebM preview"
+              autoPlay
+              loop
+              muted
+              playsInline
+              controls
+            />
+          ) : mediaInfo?.isVideo && !outputUrl ? (
+            <video
+              ref={previewImageRef}
+              src={sourceUrl}
+              aria-label={item?.title || "Video meme preview"}
+              autoPlay
+              loop
+              muted
+              playsInline
+              onTimeUpdate={(event) => {
+                const currentTimeMs = event.currentTarget.currentTime * 1000;
+                if (
+                  currentTimeMs < timeline.startMs ||
+                  (currentTimeMs >= timeline.endMs && timeline.endMs > timeline.startMs)
+                ) {
+                  event.currentTarget.currentTime = timeline.startMs / 1000;
+                  return;
+                }
+                setPreviewTimeMs(Math.max(0, currentTimeMs - timeline.startMs));
+              }}
+              onPlay={() => setIsPreviewPlaying(true)}
+              onPause={() => setIsPreviewPlaying(false)}
+              onClick={toggleVideoPreview}
+              style={{
+                filter: `brightness(${transform.brightness}%) contrast(${transform.contrast}%)`,
+                transform: `scale(${transform.zoom})${transform.flipX ? " scaleX(-1)" : ""}`,
+                ...(outputDimensions
+                  ? { width: "100%", height: "100%", maxHeight: "none", objectFit: "cover" }
+                  : {}),
+              }}
+            />
+          ) : (
+            <img
+              ref={previewImageRef}
+              src={outputUrl || sourceUrl}
+              alt={item?.title || "Meme preview"}
+              style={{
+                filter: `brightness(${transform.brightness}%) contrast(${transform.contrast}%)`,
+                transform: `scale(${transform.zoom})${transform.flipX ? " scaleX(-1)" : ""}`,
+                ...(outputDimensions
+                  ? { width: "100%", height: "100%", maxHeight: "none", objectFit: "cover" }
+                  : {}),
+              }}
+            />
+          )}
           {!outputUrl && (
             <canvas
               ref={captionCanvasRef}
@@ -856,7 +1172,9 @@ export function MemeEditor({
             ? "Previewing your generated meme."
             : outputDimensions
               ? "Preview is cropped to the selected export aspect ratio."
-              : "Caption preview updates as you type."}
+              : mediaInfo?.isVideo
+                ? "Video preview plays locally. Trim to 10 seconds or less before creating a GIF."
+                : "Caption preview updates as you type."}
         </p>
       </div>
       <form className="meme-editor-controls" onSubmit={createMeme}>
@@ -865,10 +1183,10 @@ export function MemeEditor({
           <h2>{item?.title || "Edit meme"}</h2>
         </div>
         <label className="meme-editor-upload">
-          <span>Upload or replace image / GIF</span>
+          <span>Upload or replace image, GIF, or video (up to 20 MB)</span>
           <input
             type="file"
-            accept="image/gif,image/jpeg,image/png,image/webp"
+            accept="image/gif,image/jpeg,image/png,image/webp,video/mp4,video/webm,video/ogg,video/quicktime"
             onChange={(event) => {
               useUploadedFile(event.target.files[0]);
               event.target.value = "";
@@ -904,9 +1222,14 @@ export function MemeEditor({
         </div>
         {projectFeedback && <p className="meme-editor-copy-feedback" role="status">{projectFeedback}</p>}
         {mediaInfoError && <p className="meme-editor-error" role="status">{mediaInfoError}</p>}
-        {mediaInfo?.isGif && (
+        {(mediaInfo?.isGif || mediaInfo?.isVideo) && (
           <div className="meme-editor-timeline">
-            <strong>GIF timeline · {mediaInfo.frameCount} frames · {formatTime(mediaInfo.durationMs)}</strong>
+            <strong>
+              {mediaInfo.isVideo
+                ? `Video timeline · ${formatTime(mediaInfo.durationMs)}`
+                : `GIF timeline · ${mediaInfo.frameCount} frames · ${formatTime(mediaInfo.durationMs)}`}
+              {mediaInfo.isVideo && mediaInfo.durationMs > 10_000 ? " · export up to 10 seconds" : ""}
+            </strong>
             <label className="meme-editor-field">
               <span>Trim start <strong>{formatTime(timeline.startMs)}</strong></span>
               <input
@@ -935,17 +1258,37 @@ export function MemeEditor({
                 }}
               />
             </label>
-            <label className="meme-editor-field">
-              <span>Preview layer timing <strong>{formatTime(previewTimeMs)}</strong></span>
-              <input
-                type="range"
-                min="0"
-                max={selectedDurationMs}
-                step="10"
-                value={previewTimeMs}
-                onChange={(event) => setPreviewTimeMs(Number(event.target.value))}
-              />
-            </label>
+            {(mediaInfo.isGif || mediaInfo.isVideo) && (
+              <label className="meme-editor-field">
+                <span>
+                  {mediaInfo.isVideo ? "Video playhead" : "Preview layer timing"}
+                  {" "}<strong>{formatTime(previewTimeMs)}</strong>
+                </span>
+                <input
+                  type="range"
+                  min="0"
+                  max={selectedDurationMs}
+                  step="10"
+                  value={previewTimeMs}
+                  onChange={(event) => {
+                    const timeMs = Number(event.target.value);
+                    setPreviewTimeMs(timeMs);
+                    if (mediaInfo.isVideo && previewImageRef.current) {
+                      previewImageRef.current.currentTime = (timeline.startMs + timeMs) / 1000;
+                    }
+                  }}
+                />
+              </label>
+            )}
+            {mediaInfo.isVideo && (
+              <button
+                className="meme-editor-secondary"
+                type="button"
+                onClick={toggleVideoPreview}
+              >
+                {isPreviewPlaying ? "Pause video preview" : "Play video preview"}
+              </button>
+            )}
             <div className="meme-editor-timeline-options">
               <label className="meme-editor-field">
                 <span>Playback speed</span>
@@ -1082,9 +1425,9 @@ export function MemeEditor({
                 disabled={isExporting}
               />
             </label>
-            {mediaInfo?.isGif && (
+            {(mediaInfo?.isGif || mediaInfo?.isVideo) && (
               <div className="meme-editor-layer-timing">
-                <strong>Layer timing within trimmed clip</strong>
+                <strong>Layer timing and motion</strong>
                 <div>
                   <label className="meme-editor-field">
                     <span>Show from (seconds)</span>
@@ -1119,6 +1462,20 @@ export function MemeEditor({
                     />
                   </label>
                 </div>
+                <button
+                  className="meme-editor-secondary"
+                  type="button"
+                  onClick={addPositionKeyframe}
+                  disabled={isExporting}
+                >
+                  Add position keyframe at {formatTime(previewTimeMs)}
+                </button>
+                <small>
+                  Position keyframes blend smoothly during export.
+                  {selectedText.keyframes?.length
+                    ? ` ${selectedText.keyframes.length} keyframe(s) on this layer.`
+                    : ""}
+                </small>
               </div>
             )}
           </>
@@ -1185,7 +1542,7 @@ export function MemeEditor({
         </>
         )}
         <div className="meme-editor-copilot">
-          <strong>On-device Meme Copilot</strong>
+          <strong>On-device Visual Meme Copilot</strong>
           <label className="meme-editor-field">
             <span>Idea or mood</span>
             <input
@@ -1201,9 +1558,9 @@ export function MemeEditor({
             onClick={generateCaptionIdeas}
             disabled={isGeneratingVariants || isExporting}
           >
-            Suggest captions on this device
+            Analyze preview and suggest captions
           </button>
-          <small>The browser’s built-in AI is optional and may not be available. Captions are not sent to a server.</small>
+          <small>Uses the browser’s built-in image-capable model when available. The visible media frame stays on this device; no API request is made.</small>
           {copilotFeedback && <p className="meme-editor-copy-feedback" role="status">{copilotFeedback}</p>}
         </div>
         <div className="meme-editor-variants">
@@ -1269,7 +1626,11 @@ export function MemeEditor({
             onClick={suggestFaceSafePlacement}
             disabled={isDetectingFaces || !selectedText}
           >
-            {isDetectingFaces ? "Detecting faces…" : "Suggest face-safe placement"}
+            {isDetectingFaces
+              ? "Analyzing frames on this device…"
+              : mediaInfo?.isVideo
+                ? "Track face-safe position across clip"
+                : "Suggest face-safe placement"}
           </button>
           {faceFeedback && <p className="meme-editor-copy-feedback" role="status">{faceFeedback}</p>}
           <button
@@ -1343,6 +1704,29 @@ export function MemeEditor({
         </div>
         <div className="meme-editor-export-preset">
           <strong>Export format</strong>
+          {mediaInfo?.isVideo && (
+            <>
+              <label className="meme-editor-field">
+                <span>Video file format</span>
+                <select
+                  value={videoOutputFormat}
+                  onChange={(event) => {
+                    setVideoOutputFormat(event.target.value);
+                    invalidateOutput();
+                  }}
+                >
+                  <option value="gif">Animated GIF</option>
+                  <option value="webm" disabled={!supportsWebMExport()}>
+                    WebM video{supportsWebMExport() ? "" : " · not supported"}
+                  </option>
+                </select>
+              </label>
+              <small>
+                WebM is recorded on-device, has no audio, and does not support reverse playback.
+                {!supportsWebMExport() ? " This browser does not support canvas video recording." : ""}
+              </small>
+            </>
+          )}
           <label className="meme-editor-field">
             <span>Canvas size</span>
             <select
@@ -1422,8 +1806,18 @@ export function MemeEditor({
         </div>
         {exportError && <p className="meme-editor-error" role="alert">{exportError}</p>}
         <div className="meme-editor-actions">
-          <button className="meme-editor-primary" type="submit" disabled={isExporting}>
-            {isExporting ? "Creating meme…" : "Create meme"}
+          <button className="meme-editor-primary" type="submit" disabled={isExporting || isExportingPack}>
+            {isExporting
+              ? `Creating ${selectedExportLabel}…`
+              : `Create ${selectedExportLabel === "WebM" ? "WebM" : "meme"}`}
+          </button>
+          <button
+            className="meme-editor-secondary"
+            type="button"
+            onClick={exportPlatformPack}
+            disabled={isExporting || isExportingPack}
+          >
+            {isExportingPack ? "Building platform pack…" : "Export platform pack"}
           </button>
           {outputBlob?.type === "image/gif" && (
             <button
@@ -1440,15 +1834,21 @@ export function MemeEditor({
           <>
             <div className="meme-editor-output-actions">
               <button className="meme-editor-secondary" type="button" onClick={downloadMeme}>
-                Download {outputBlob.type === "image/gif" ? "GIF" : "PNG"}
+                Download {outputBlob.type === "image/gif" ? "GIF" : outputBlob.type === "video/webm" ? "WebM" : "PNG"}
               </button>
               <button className="meme-editor-secondary" type="button" onClick={shareMeme}>
                 Share meme
               </button>
             </div>
             <p className="meme-editor-export-info" role="status">
-              {outputDimensions?.width ?? mediaInfo?.width ?? "?"} × {outputDimensions?.height ?? mediaInfo?.height ?? "?"}
-              {" · "}{(outputBlob.size / 1024).toFixed(1)} KB · {outputBlob.type === "image/gif" ? "Animated GIF" : "PNG image"}
+              {displayOutputDimensions?.width ?? mediaInfo?.width ?? "?"} × {displayOutputDimensions?.height ?? mediaInfo?.height ?? "?"}
+              {" · "}{(outputBlob.size / 1024).toFixed(1)} KB · {
+                outputBlob.type === "image/gif"
+                  ? "Animated GIF"
+                  : outputBlob.type === "video/webm"
+                    ? "WebM video"
+                    : "PNG image"
+              }
             </p>
           </>
         )}
@@ -1477,7 +1877,9 @@ export function MemeEditor({
           >
             <div className="meme-editor-dialog-heading">
               <h2 id="meme-editor-dialog-title">
-                {isExporting ? "Creating your GIF…" : "Your animated meme"}
+                {isExporting
+                  ? `Creating your ${selectedExportLabel}…`
+                  : "Your generated meme"}
               </h2>
               <button
                 className="meme-editor-dialog-close"
@@ -1491,19 +1893,34 @@ export function MemeEditor({
             {isExporting ? (
               <div className="meme-editor-dialog-loading" role="status">
                 <span className="loader" />
-                <span>Generating your GIF with the edited text…</span>
+                <span>Generating your {selectedExportLabel} with the edited text…</span>
               </div>
             ) : outputUrl && (
               <>
-                <img
-                  className="meme-editor-dialog-image"
-                  src={outputUrl}
-                  alt={item?.title || "Your edited meme"}
-                />
+                {outputBlob?.type === "video/webm" ? (
+                  <video
+                    className="meme-editor-dialog-image"
+                    src={outputUrl}
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    controls
+                    aria-label={item?.title || "Your edited WebM video"}
+                  />
+                ) : (
+                  <img
+                    className="meme-editor-dialog-image"
+                    src={outputUrl}
+                    alt={item?.title || "Your edited meme"}
+                  />
+                )}
                 <p className="meme-editor-dialog-note">
                   {outputBlob?.type === "image/gif"
                     ? "Right-click the GIF to copy it, or use the buttons to download or share."
-                    : "Download or share your edited image."}
+                    : outputBlob?.type === "video/webm"
+                      ? "WebM is video-only with no audio. Download or share the edited clip."
+                      : "Download or share your edited image."}
                 </p>
                 {outputBlob?.type === "image/gif" && (
                   <button
@@ -1517,7 +1934,7 @@ export function MemeEditor({
                 )}
                 <div className="meme-editor-dialog-actions">
                   <button className="meme-editor-secondary" type="button" onClick={downloadMeme}>
-                    Download {outputBlob?.type === "image/gif" ? "GIF" : "PNG"}
+                    Download {outputBlob?.type === "image/gif" ? "GIF" : outputBlob?.type === "video/webm" ? "WebM" : "PNG"}
                   </button>
                   <button className="meme-editor-secondary" type="button" onClick={shareMeme}>
                     Share meme
