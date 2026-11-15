@@ -1,4 +1,5 @@
 name: Deploy Frontend to GitHub Pages
+run-name: ${{ github.ref_name == 'main' && '🚀 Production Deploy [main]' || '🛠️ Staging Deploy [develop]' }} (${{ github.sha }})
 
 on:
   push:
@@ -6,12 +7,12 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   pages: write
   id-token: write
 
 concurrency:
-  group: pages-${{ github.ref_name }}
+  group: pages
   cancel-in-progress: true
 
 jobs:
@@ -48,41 +49,26 @@ jobs:
           VITE_TENOR_CLIENT_KEY: ${{ secrets.VITE_TENOR_CLIENT_KEY }}
           VITE_KLIPY_API_KEY: ${{ secrets.VITE_KLIPY_API_KEY }}
           
-      - uses: actions/upload-pages-artifact@v3
-        if: github.ref_name == 'main'
-        with:
-          path: dist
+      - name: Generate Deployment Summary
+        run: |
+          echo "### 🌐 Deployment Status" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Branch** | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Commit** | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Triggered By** | @${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Target Environment** | GitHub Pages (Live) |" >> $GITHUB_STEP_SUMMARY
 
-      - name: Save build artifact for develop branch
-        uses: actions/upload-artifact@v4
-        if: github.ref_name == 'develop'
+      - uses: actions/upload-pages-artifact@v3
         with:
-          name: dist-dev
           path: dist
 
   deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     needs: build
     steps:
-      # Case A: Deploy main branch using native GitHub Pages deployment
-      - name: Deploy to GitHub Pages (Main)
-        if: github.ref_name == 'main'
+      - id: deployment
         uses: actions/deploy-pages@v4
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # Case B: Deploy develop branch to gh-pages-dev branch
-      - name: Download develop build artifact
-        if: github.ref_name == 'develop'
-        uses: actions/download-artifact@v4
-        with:
-          name: dist-dev
-          path: dist
-
-      - name: Deploy to Development Branch (gh-pages-dev)
-        if: github.ref_name == 'develop'
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./dist
-          publish_branch: gh-pages-dev
