@@ -1,5 +1,8 @@
 import { useCallback, useState } from "react";
-import { PROVIDERS } from "../constants/appConstants.js";
+import {
+  PROVIDERS,
+  TRENDING_SEARCH_PROVIDERS,
+} from "../constants/appConstants.js";
 import { getLogicalRoute } from "../utils/routes.js";
 import { useHashRoute } from "./useHashRoute.js";
 import { useProviderQueries } from "./useProviderQueries.js";
