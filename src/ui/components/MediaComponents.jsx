@@ -1,5 +1,6 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MEDIA_TYPES, PROVIDER_NAMES, PROVIDERS } from "../constants/appConstants.js";
+import { copyMediaToClipboard } from "../services/clipboard.js";
 
 export function MediaSwitch({ kind, setKind }) {
   return (
@@ -32,10 +33,21 @@ export function ProviderFilters({ providers, onToggle, className = "" }) {
   );
 }
 
-export function MediaCard({ item, onSelect, onImageError, cardRef, overlayAlwaysVisible = false }) {
+export function MediaCard({
+  item,
+  onSelect,
+  onImageError,
+  cardRef,
+  overlayAlwaysVisible = false,
+  copyOnClick = false,
+}) {
   const videoRef = useRef(null);
+  const copyFeedbackTimer = useRef(null);
   const [muted, setMuted] = useState(true);
   const [audioBlocked, setAudioBlocked] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState(null);
+
+  useEffect(() => () => window.clearTimeout(copyFeedbackTimer.current), []);
 
   const playWithSound = () => {
     const video = videoRef.current;
@@ -59,6 +71,43 @@ export function MediaCard({ item, onSelect, onImageError, cardRef, overlayAlways
     setMuted(true);
   };
 
+  function showCopyFeedback(feedback) {
+    window.clearTimeout(copyFeedbackTimer.current);
+    setCopyFeedback(feedback);
+    if (feedback.tone !== "pending") {
+      copyFeedbackTimer.current = window.setTimeout(() => setCopyFeedback(null), 2400);
+    }
+  }
+
+  async function copyResult() {
+    showCopyFeedback({ tone: "pending", message: "Copying…" });
+    try {
+      const result = await copyMediaToClipboard(item);
+      const mediaName = item.kind === "sticker" ? "Sticker" : "GIF";
+      showCopyFeedback({
+        tone: "success",
+        message: result === "media" ? `${mediaName} copied!` : `${mediaName} link copied!`,
+      });
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      showCopyFeedback({ tone: "error", message: `Copy failed: ${message}` });
+    }
+  }
+
+  function handleClick() {
+    if (copyOnClick) {
+      void copyResult();
+    } else if (item.video) {
+      playWithSound();
+    } else {
+      onSelect?.();
+    }
+  }
+
+  const ariaLabel = copyOnClick
+    ? `Copy ${item.title} to clipboard`
+    : item.video ? `Play ${item.title} with sound` : `Search ${item.title}`;
+
   const content = item.video ? (
     <video
       ref={videoRef}
@@ -79,13 +128,19 @@ export function MediaCard({ item, onSelect, onImageError, cardRef, overlayAlways
     <article className="media-card" ref={cardRef}>
       <button
         className={`media-button ${overlayAlwaysVisible ? "overlay-always-visible" : ""}`}
-        onClick={item.video ? playWithSound : onSelect}
+        onClick={handleClick}
         onMouseEnter={item.video ? playWithSound : undefined}
         onMouseLeave={item.video ? muteVideo : undefined}
         type="button"
-        aria-label={item.video ? `Play ${item.title} with sound` : `Search ${item.title}`}
+        aria-label={ariaLabel}
+        disabled={copyFeedback?.tone === "pending"}
       >
         {content}
+        {copyFeedback && (
+          <span className={`copy-feedback ${copyFeedback.tone}`} role="status">
+            {copyFeedback.message}
+          </span>
+        )}
         <span className="media-overlay">
           <span>{item.title}</span>
           {audioBlocked && <span>Click to enable sound</span>}

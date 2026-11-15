@@ -52,6 +52,7 @@ export function ProviderSections({
                   <MediaCard
                     item={item}
                     key={`${provider}-${item.id}-${index}`}
+                    copyOnClick={!item.video && item.kind !== "clip"}
                   />
                 ))}
               </div>
