@@ -93,6 +93,7 @@ h1, h2, h3, p { margin-top: 0; }
 .media-placeholder { display: grid; min-height: 145px; place-items: center; padding: 18px; color: #39383a; background: linear-gradient(135deg, #f8d7ce, #e0d4f7 55%, #c9efda); font: 600 17px "Space Grotesk", sans-serif; text-align: center; }
 .media-overlay { position: absolute; inset: auto 0 0; display: flex; justify-content: space-between; align-items: end; gap: 8px; padding: 25px 10px 9px; color: white; text-align: left; font-size: 10px; opacity: 0; background: linear-gradient(transparent, #000a); transition: opacity .16s ease; }
 .media-button:hover .media-overlay, .media-button:focus-visible .media-overlay { opacity: 1; }
+.media-button.overlay-always-visible .media-overlay { opacity: 1; }
 .attribution { color: #ddd; font-size: 8px; font-weight: 700; letter-spacing: .5px; }
 .provider-error, .provider-empty, .empty-state, .loading-state { padding: 20px; border: 1px solid #e8e7e5; border-radius: 9px; color: #77767a; background: white; font-size: 12px; }
 .provider-error { color: #9a4036; border-color: #f0c9c4; background: #fff8f6; }

@@ -31,8 +31,9 @@ receives the combined locale. GIPHY receives its documented `lang` values and
 the selected country where supported; for languages outside GIPHY's supported
 list, the `lang` parameter is omitted rather than sending an unsupported code.
 Tenor's GIF Explore section uses a static list of its top-level category names
-and matches them with preview GIFs from Tenor's categories response; other
-Explore categories are loaded from their providers.
+and loads matching GIF previews from Tenor's categories response or a lazy
+one-result search when a category thumbnail is missing; other Explore
+categories are loaded from their providers.
 
 ## Important: no hosted REST API
 

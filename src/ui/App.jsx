@@ -771,6 +771,8 @@ function MemeApp() {
                   loading={categoriesQuery.isPending}
                   onSelect={chooseSearch}
                   categoryView
+                  locale={locale}
+                  logRequest={logRequest}
                 />
               ) : (
                 <ProviderSections
@@ -824,7 +826,15 @@ function ProviderFilters({ providers, onToggle, className = "" }) {
   );
 }
 
-function ProviderSections({ providers, results, loading, onSelect, categoryView = false }) {
+function ProviderSections({
+  providers,
+  results,
+  loading,
+  onSelect,
+  categoryView = false,
+  locale,
+  logRequest,
+}) {
   if (loading) {
     return <div className="loading-state"><span className="loader" /> Contacting selected providers...</div>;
   }
@@ -842,30 +852,102 @@ function ProviderSections({ providers, results, loading, onSelect, categoryView 
               <span className={`provider-dot ${provider}`} />
               <h3>{PROVIDER_NAMES[provider]}</h3>
               <span className="provider-count">
-                {result?.error ? "Unavailable" : items.length ? `${items.length} results` : ""}
+                {items.length ? `${items.length} results` : result?.error ? "Unavailable" : ""}
               </span>
             </div>
-            {result?.error ? (
-              <div className="provider-error" role="status">{result.error}</div>
-            ) : items.length ? (
+            {result?.error && <div className="provider-error" role="status">{result.error}</div>}
+            {items.length ? (
               <div className="mosaic-grid">
                 {items.map((item, index) => (
-                  <MediaCard
-                    item={item}
-                    key={`${provider}-${item.id}-${index}`}
-                    onSelect={categoryView ? () => onSelect?.(item.query) : undefined}
-                  />
+                  categoryView && provider === "tenor" ? (
+                    <TenorExploreCategoryCard
+                      item={item}
+                      key={`${provider}-${item.id}-${index}`}
+                      locale={locale}
+                      logRequest={logRequest}
+                      onSelect={() => onSelect?.(item.query)}
+                    />
+                  ) : (
+                    <MediaCard
+                      item={item}
+                      key={`${provider}-${item.id}-${index}`}
+                      onSelect={categoryView ? () => onSelect?.(item.query) : undefined}
+                    />
+                  )
                 ))}
               </div>
-            ) : (
+            ) : !result?.error ? (
               <div className="provider-empty">
                 {categoryView ? "No categories returned for this media type." : "No results yet. Try another search or provider."}
               </div>
-            )}
+            ) : null}
           </section>
         );
       })}
     </div>
+  );
+}
+
+function TenorExploreCategoryCard({ item, locale, logRequest, onSelect }) {
+  const tileRef = useRef(null);
+  const [isVisible, setIsVisible] = useState(false);
+  const [categoryPreviewFailed, setCategoryPreviewFailed] = useState(false);
+  const [searchPreviewFailed, setSearchPreviewFailed] = useState(false);
+
+  useEffect(() => {
+    const tile = tileRef.current;
+    if (!tile) return undefined;
+    if (!("IntersectionObserver" in window)) {
+      setIsVisible(true);
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setIsVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "250px" },
+    );
+    observer.observe(tile);
+    return () => observer.disconnect();
+  }, []);
+
+  const hasCategoryPreview = Boolean(item.imageUrl) && !categoryPreviewFailed;
+  const previewQuery = useQuery({
+    queryKey: ["tenor-explore-preview", item.query, locale],
+    queryFn: () => requestProvider(
+      "tenor",
+      "search",
+      { q: item.query, kind: "gif", locale, limit: 1 },
+      logRequest,
+    ),
+    enabled:
+      isVisible &&
+      !hasCategoryPreview &&
+      !searchPreviewFailed &&
+      providerIsConfigured("tenor"),
+    staleTime: 24 * 60 * 60 * 1000,
+    gcTime: 24 * 60 * 60 * 1000,
+  });
+  const searchPreview = previewQuery.data?.items?.[0]?.imageUrl ?? "";
+  const imageUrl = hasCategoryPreview
+    ? item.imageUrl
+    : searchPreviewFailed ? "" : searchPreview;
+
+  return (
+    <MediaCard
+      cardRef={tileRef}
+      item={{ ...item, imageUrl }}
+      onSelect={onSelect}
+      overlayAlwaysVisible
+      onImageError={() => {
+        if (hasCategoryPreview) setCategoryPreviewFailed(true);
+        else setSearchPreviewFailed(true);
+      }}
+    />
   );
 }
 
@@ -1020,7 +1102,7 @@ function ReactionTile({
   );
 }
 
-function MediaCard({ item, onSelect }) {
+function MediaCard({ item, onSelect, onImageError, cardRef, overlayAlwaysVisible = false }) {
   const videoRef = useRef(null);
   const [muted, setMuted] = useState(true);
   const [audioBlocked, setAudioBlocked] = useState(false);
@@ -1060,13 +1142,13 @@ function MediaCard({ item, onSelect }) {
     />
   ) : (
     item.imageUrl
-      ? <img src={item.imageUrl} alt={item.title} loading="lazy" />
+      ? <img src={item.imageUrl} alt={item.title} loading="lazy" onError={onImageError} />
       : <span className="media-placeholder">{item.title}</span>
   );
   return (
-    <article className="media-card">
+    <article className="media-card" ref={cardRef}>
       <button
-        className="media-button"
+        className={`media-button ${overlayAlwaysVisible ? "overlay-always-visible" : ""}`}
         onClick={item.video ? playWithSound : onSelect}
         onMouseEnter={item.video ? playWithSound : undefined}
         onMouseLeave={item.video ? muteVideo : undefined}
