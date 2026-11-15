@@ -114,6 +114,8 @@ h1, h2, h3, p { margin-top: 0; }
 .media-switch button { padding: 8px 13px; border: 0; border-radius: 5px; color: #858487; background: transparent; font-size: 11px; font-weight: 600; }
 .media-switch button.active { color: #171718; background: #f0efed; }
 .provider-sections { display: grid; gap: 35px; }
+.results-pagination { display: grid; justify-items: center; gap: 9px; padding: 8px 0 20px; }
+.results-pagination span { color: #858387; font-size: 10px; text-align: center; }
 .provider-section-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
 .provider-section-heading .provider-dot { width: 10px; height: 10px; }
 .provider-section-heading h3 { margin: 0; font: 600 16px "Space Grotesk", sans-serif; }

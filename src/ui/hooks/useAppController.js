@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   PROVIDERS,
   TRENDING_SEARCH_PROVIDERS,
@@ -244,7 +244,23 @@ export function useAppController() {
     );
   }
 
-  const visibleResults = mediaQuery.data ?? {};
+  const visibleResults = useMemo(() => {
+    const pages = mediaQuery.data?.pages ?? [];
+    return Object.fromEntries(providers.map((provider) => {
+      const providerPages = pages.map((pageResult) => pageResult[provider]).filter(Boolean);
+      const seenItems = new Set();
+      const items = providerPages.flatMap((result) => result.items ?? []).filter((item) => {
+        const key = item.id || item.imageUrl;
+        if (seenItems.has(key)) return false;
+        seenItems.add(key);
+        return true;
+      });
+      return [provider, {
+        ...(providerPages.at(-1) ?? {}),
+        items,
+      }];
+    }));
+  }, [mediaQuery.data, providers]);
   async function findSimilar(reference) {
     const requestId = similarityRequestRef.current + 1;
     similarityRequestRef.current = requestId;

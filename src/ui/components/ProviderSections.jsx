@@ -1,6 +1,53 @@
+import { useEffect, useRef } from "react";
 import { PROVIDER_NAMES } from "../constants/appConstants.js";
 import { ExploreSections } from "./ExploreSections.jsx";
 import { MediaCard } from "./MediaComponents.jsx";
+
+function PaginationControl({ hasNextPage, isFetchingNextPage, onLoadMore }) {
+  const sentinelRef = useRef(null);
+  const loadingRef = useRef(false);
+
+  useEffect(() => {
+    if (!isFetchingNextPage) loadingRef.current = false;
+  }, [isFetchingNextPage]);
+
+  useEffect(() => {
+    if (
+      !hasNextPage ||
+      isFetchingNextPage ||
+      typeof globalThis.IntersectionObserver !== "function" ||
+      !sentinelRef.current
+    ) {
+      return undefined;
+    }
+    const observer = new globalThis.IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) loadNextPage();
+    }, { rootMargin: "600px" });
+    observer.observe(sentinelRef.current);
+    return () => observer.disconnect();
+  }, [hasNextPage, isFetchingNextPage, onLoadMore]);
+
+  function loadNextPage() {
+    if (!hasNextPage || isFetchingNextPage || loadingRef.current) return;
+    loadingRef.current = true;
+    onLoadMore();
+  }
+
+  if (!hasNextPage) return null;
+  return (
+    <div className="results-pagination" ref={sentinelRef}>
+      <button
+        className="meme-editor-secondary"
+        type="button"
+        onClick={loadNextPage}
+        disabled={isFetchingNextPage}
+      >
+        {isFetchingNextPage ? "Loading more results..." : "Load next page"}
+      </button>
+      <span>{isFetchingNextPage ? "Fetching more from selected providers..." : "Scroll for more or load the next page."}</span>
+    </div>
+  );
+}
 
 export function ProviderSections({
   providers,
@@ -16,6 +63,9 @@ export function ProviderSections({
   onEdit,
   onFindSimilar,
   layout = "providers",
+  hasNextPage = false,
+  isFetchingNextPage = false,
+  onLoadMore,
 }) {
   if (categoryView) {
     return (
@@ -81,6 +131,11 @@ export function ProviderSections({
         ) : !failures.length ? (
           <div className="provider-empty">No results yet. Try another search or provider.</div>
         ) : null}
+        <PaginationControl
+          hasNextPage={hasNextPage}
+          isFetchingNextPage={isFetchingNextPage}
+          onLoadMore={onLoadMore}
+        />
       </section>
     );
   }
@@ -121,6 +176,11 @@ export function ProviderSections({
           </section>
         );
       })}
+      <PaginationControl
+        hasNextPage={hasNextPage}
+        isFetchingNextPage={isFetchingNextPage}
+        onLoadMore={onLoadMore}
+      />
     </div>
   );
 }

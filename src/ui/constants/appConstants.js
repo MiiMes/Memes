@@ -145,13 +145,13 @@ export const API_ACTIONS = [
 
 export const PROVIDER_CONFIG = {
   giphy: {
-    key: import.meta.env.VITE_GIPHY_API_KEY ?? "",
+    key: import.meta.env?.VITE_GIPHY_API_KEY ?? "",
   },
   tenor: {
-    key: import.meta.env.VITE_TENOR_API_KEY ?? "",
-    clientKey: import.meta.env.VITE_TENOR_CLIENT_KEY || "tenor_web",
+    key: import.meta.env?.VITE_TENOR_API_KEY ?? "",
+    clientKey: import.meta.env?.VITE_TENOR_CLIENT_KEY || "tenor_web",
   },
   klipy: {
-    key: import.meta.env.VITE_KLIPY_API_KEY ?? "",
+    key: import.meta.env?.VITE_KLIPY_API_KEY ?? "",
   },
 };

@@ -152,8 +152,33 @@ function mediaItems(provider, action, payload, kind) {
   return (entries ?? []).map(normalize);
 }
 
+export function getNextPageCursor(provider, action, payload, itemCount, cursor) {
+  if (action !== "search" && action !== "trending") return undefined;
+  if (provider === "giphy") {
+    const pagination = payload.pagination ?? {};
+    const offset = Number(pagination.offset ?? cursor ?? 0);
+    const count = Number(pagination.count ?? itemCount);
+    const total = Number(pagination.total_count);
+    const nextOffset = offset + count;
+    return count > 0 && nextOffset < total && nextOffset <= 499
+      ? nextOffset
+      : undefined;
+  }
+  if (provider === "tenor") {
+    const next = payload.next;
+    return next != null && String(next) !== "" && String(next) !== String(cursor)
+      ? String(next)
+      : undefined;
+  }
+  const pagination = payload.data ?? {};
+  const currentPage = Number(pagination.current_page ?? cursor ?? 1);
+  return pagination.has_next === true && Number.isFinite(currentPage)
+    ? currentPage + 1
+    : undefined;
+}
+
 function makeRequest(provider, action, options) {
-  const { q, kind, locale, limit } = options;
+  const { q, kind, locale, limit, cursor } = options;
   if (provider === "giphy") {
     if (!PROVIDER_CONFIG.giphy.key) {
       return { error: "Set VITE_GIPHY_API_KEY to enable GIPHY." };
@@ -175,6 +200,9 @@ function makeRequest(provider, action, options) {
     url.searchParams.set("api_key", PROVIDER_CONFIG.giphy.key);
     if (action !== "categories" && action !== "trending-searches") {
       url.searchParams.set("limit", String(limit));
+    }
+    if (Number.isFinite(Number(cursor)) && Number(cursor) > 0) {
+      url.searchParams.set("offset", String(cursor));
     }
     if (action === "search") url.searchParams.set("q", q);
     if (action === "search" || action === "trending") {
@@ -207,6 +235,7 @@ function makeRequest(provider, action, options) {
     url.searchParams.set("locale", locale);
     if (locale.includes("_")) url.searchParams.set("country", locale.split("_")[1]);
     if (action !== "trending-searches") url.searchParams.set("limit", String(limit));
+    if (cursor != null && String(cursor)) url.searchParams.set("pos", String(cursor));
     url.searchParams.set("contentfilter", "medium");
     if (action === "trending-searches") url.searchParams.set("type", "trending");
     if (action === "search") {
@@ -228,6 +257,9 @@ function makeRequest(provider, action, options) {
   );
   url.searchParams.set("locale", locale);
   if (action !== "categories") url.searchParams.set("per_page", String(limit));
+  if (action === "search" || action === "trending") {
+    url.searchParams.set("page", String(Math.max(1, Number(cursor) || 1)));
+  }
   if (action === "search") url.searchParams.set("q", q);
   return { url };
 }
@@ -267,6 +299,13 @@ export async function requestProvider(provider, action, options, logRequest) {
       );
     }
     const items = mediaItems(provider, action, payload, options.kind);
+    const nextCursor = getNextPageCursor(
+      provider,
+      action,
+      payload,
+      items.length,
+      options.cursor,
+    );
     logRequest({
       requestId,
       time: new Date().toISOString(),
@@ -278,7 +317,12 @@ export async function requestProvider(provider, action, options, logRequest) {
       itemCount: items.length,
       error: "",
     });
-    return { items, raw: payload, endpoint: safeRequestUrl(request.url.href) };
+    return {
+      items,
+      raw: payload,
+      endpoint: safeRequestUrl(request.url.href),
+      ...(nextCursor !== undefined ? { nextCursor } : {}),
+    };
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause);
     logRequest({
@@ -296,12 +340,26 @@ export async function requestProvider(provider, action, options, logRequest) {
   }
 }
 
-export async function requestProviders({ providers, action, q = "", kind, locale, logRequest }) {
-  const options = { q, kind, locale, limit: 30 };
+export async function requestProviders({
+  providers,
+  action,
+  q = "",
+  kind,
+  locale,
+  logRequest,
+  cursors = {},
+  limit = 30,
+}) {
   const entries = await Promise.all(
     providers.map(async (provider) => [
       provider,
-      await requestProvider(provider, action, options, logRequest),
+      await requestProvider(provider, action, {
+        q,
+        kind,
+        locale,
+        limit,
+        cursor: cursors[provider],
+      }, logRequest),
     ]),
   );
   return Object.fromEntries(entries);

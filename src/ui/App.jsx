@@ -288,12 +288,15 @@ function MemeApp() {
                   <ProviderSections
                     providers={providers}
                     results={visibleResults}
-                    loading={mediaQuery.isPending || mediaQuery.isFetching}
+                    loading={mediaQuery.isPending || (mediaQuery.isFetching && !mediaQuery.isFetchingNextPage)}
                     layout={resultsLayout}
                     isFavorite={isFavorite}
                     onToggleFavorite={toggleFavorite}
                     onEdit={openEditor}
                     onFindSimilar={findSimilar}
+                    hasNextPage={Boolean(mediaQuery.hasNextPage)}
+                    isFetchingNextPage={mediaQuery.isFetchingNextPage}
+                    onLoadMore={() => mediaQuery.fetchNextPage()}
                   />
                 </>
               )}

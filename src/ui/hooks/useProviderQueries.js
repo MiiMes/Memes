@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import {
   TENOR_GIF_EXPLORE_CATEGORIES,
   TRENDING_SEARCH_PROVIDERS,
@@ -22,16 +22,37 @@ export function useProviderQueries({
   logRequest,
 }) {
   const mediaAction = submittedQuery ? "search" : "trending";
-  const mediaQuery = useQuery({
+  const mediaQuery = useInfiniteQuery({
     queryKey: ["media", mediaAction, submittedQuery, kind, locale, providers],
-    queryFn: () => requestProviders({
-      providers,
-      action: mediaAction,
-      q: submittedQuery,
-      kind,
-      locale,
-      logRequest,
-    }),
+    initialPageParam: null,
+    queryFn: ({ pageParam }) => {
+      const activeProviders = pageParam
+        ? providers.filter((provider) => Object.hasOwn(pageParam, provider))
+        : providers;
+      return requestProviders({
+        providers: activeProviders,
+        action: mediaAction,
+        q: submittedQuery,
+        kind,
+        locale,
+        logRequest,
+        cursors: pageParam ?? {},
+      });
+    },
+    getNextPageParam: (lastPage, _allPages, _lastPageParam, allPageParams) => {
+      const nextCursors = {};
+      for (const [provider, result] of Object.entries(lastPage)) {
+        const cursor = result?.nextCursor;
+        if (cursor === undefined || cursor === null || cursor === "") continue;
+        const cursorWasUsed = allPageParams.some((pageParam) =>
+          pageParam &&
+          Object.hasOwn(pageParam, provider) &&
+          String(pageParam[provider]) === String(cursor),
+        );
+        if (!cursorWasUsed) nextCursors[provider] = cursor;
+      }
+      return Object.keys(nextCursors).length ? nextCursors : undefined;
+    },
     enabled: page === "home",
   });
   const trendingQuery = useQuery({
