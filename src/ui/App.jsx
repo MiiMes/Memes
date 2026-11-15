@@ -618,12 +618,16 @@ function MemeApp() {
 
   const visibleResults = mediaQuery.data ?? {};
   const visibleTrendingSearches = trendingQuery.data ?? {};
-  const trendingSearchTerms = Object.entries(visibleTrendingSearches).flatMap(
-    ([provider, result]) => (result.items ?? []).slice(0, 5).map((term) => ({
-      ...term,
-      provider,
-    })),
-  ).slice(0, 8);
+  const trendingSearchTerms = Array.from({ length: 5 }, (_, index) =>
+    TRENDING_SEARCH_PROVIDERS.flatMap((provider) => {
+      const term = visibleTrendingSearches[provider]?.items?.[index];
+      return term ? [{ ...term, provider }] : [];
+    }),
+  ).flat().slice(0, 8);
+  const trendingSearchErrors = TRENDING_SEARCH_PROVIDERS.flatMap((provider) => {
+    const error = visibleTrendingSearches[provider]?.error;
+    return error ? [{ provider, error }] : [];
+  });
   const visibleCategories = categoriesQuery.data ?? {};
   const consoleRoute = getLogicalRoute(apiAction, {
     q: apiQuery.trim(),
@@ -737,9 +741,10 @@ function MemeApp() {
             />
           ) : (
             <>
-              {page === "home" && trendingSearchTerms.length > 0 && (
+              {page === "home" && (trendingSearchTerms.length > 0 || trendingSearchErrors.length > 0) && (
                 <TrendingSearchStrip
                   searches={trendingSearchTerms}
+                  errors={trendingSearchErrors}
                   locale={locale}
                   logRequest={logRequest}
                   onSelect={(term) => chooseSearch(term)}
@@ -822,7 +827,7 @@ function MediaSwitch({ kind, setKind }) {
   );
 }
 
-function TrendingSearchStrip({ searches, locale, logRequest, onSelect }) {
+function TrendingSearchStrip({ searches, errors, locale, logRequest, onSelect }) {
   return (
     <section className="trending-search-section" aria-labelledby="trending-search-heading">
       <div className="trending-search-heading">
@@ -831,6 +836,11 @@ function TrendingSearchStrip({ searches, locale, logRequest, onSelect }) {
           <h2 id="trending-search-heading">Trending searches</h2>
         </div>
       </div>
+      {errors.map(({ provider, error }) => (
+        <p className="trending-search-error" key={provider} role="status">
+          Could not load {PROVIDER_NAMES[provider]} trending searches: {error}
+        </p>
+      ))}
       <div className="trending-search-strip">
         {searches.map((term, index) => (
           <TrendingSearchCard
@@ -901,6 +911,9 @@ function TrendingSearchCard({ term, index, locale, logRequest, onSelect }) {
           : <span aria-hidden="true">{term.title}</span>}
       </span>
       <span className="trending-search-title">{term.title}</span>
+      <span className={`trending-search-provider ${term.provider}`}>
+        {PROVIDER_NAMES[term.provider]}
+      </span>
     </button>
   );
 }
