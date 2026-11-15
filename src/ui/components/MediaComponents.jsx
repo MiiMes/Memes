@@ -84,11 +84,17 @@ export function MediaCard({
     try {
       const copyFormat = await copyMediaToClipboard(item);
       const mediaName = item.kind === "sticker" ? "Sticker" : "GIF";
+      const copyMessages = {
+        "multi-format": `${mediaName} copied in multiple formats; paste to verify.`,
+        native: `${mediaName} bytes copied (${copyFormat.mimeType}); paste to verify.`,
+        "rich-html-custom": `${mediaName} copied as rich HTML and a browser format; paste support varies.`,
+        "web-custom": `${mediaName} copied in a browser-specific format; other apps may ignore it.`,
+        "rich-html": `${mediaName} copied as rich HTML; paste support varies.`,
+        "legacy-html": "Legacy image markup copied; GIF paste is unverified.",
+      };
       showCopyFeedback({
         tone: "success",
-        message: copyFormat === "native"
-          ? `${mediaName} copied!`
-          : `${mediaName} copied in a browser-specific format; other apps may not accept it.`,
+        message: copyMessages[copyFormat.method] ?? `${mediaName} copy accepted by the browser.`,
       });
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
