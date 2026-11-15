@@ -41,12 +41,29 @@ the session.
 
 The browser-only meme editor accepts uploaded or provider GIFs and images,
 supports draggable text and sticker layers, drawing, image adjustments, and
-GIF palette/dithering options. GIFs and still images can be downloaded or
-shared through the browser; GIF export is limited by the format's 256-color
-palette. Draft source files and settings, generated GIF favorites, favorite
-collections/tags, and recent searches are stored locally in the browser and
-are not synchronized across devices. The home search can show results grouped
-by provider or in one combined view.
+GIF palette/dithering options. Animated GIFs can be trimmed, sped up, reversed,
+and exported with timed text layers. Canvas presets support square, landscape,
+portrait, and story aspect ratios; output dimensions and file size are shown
+after export. Portable `.meme` project files bundle the source image and editor
+settings for download and import.
+
+Batch variations render up to four alternate captions. Caption suggestions use
+the browser's built-in on-device `LanguageModel` API only when available; face
+placement uses the optional browser `FaceDetector` API when available. Both
+features report when the browser does not support the API, and manual editing
+remains available. Visual similarity compares thumbnails from currently
+loaded results and favorites on-device; cross-origin image restrictions can
+prevent some images from being compared. It is not a provider-wide reverse
+image search.
+
+GIFs and still images can be downloaded or shared through the browser; GIF
+export is limited by the format's 256-color palette. Draft source files and
+settings, generated GIF favorites, favorite collections/tags, and recent
+searches are stored locally in the browser and are not synchronized across
+devices. The home search can show results grouped by provider or in one
+combined view. The installable PWA caches the app shell and static assets after
+the first visit, so saved editor data remains available offline; provider
+search still requires a network connection.
 
 The language/region selector includes Tenor's documented search languages and
 common regional variants. Tenor receives both `locale` and `country`; KLIPY

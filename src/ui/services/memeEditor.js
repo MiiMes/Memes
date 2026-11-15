@@ -71,8 +71,17 @@ export function drawCaption(context, text, position, width, height, fontSizePerc
   context.restore();
 }
 
-export function drawMemeOverlays(context, textLayers, strokes, width, height, fontSizePercent) {
+export function drawMemeOverlays(
+  context,
+  textLayers,
+  strokes,
+  width,
+  height,
+  fontSizePercent,
+  timeMs = null,
+) {
   textLayers.forEach((layer) => {
+    if (timeMs !== null && (timeMs < (layer.startMs ?? 0) || timeMs > (layer.endMs ?? Infinity))) return;
     drawCaption(
       context,
       layer.text,
@@ -107,11 +116,20 @@ function drawTransformedSource(context, source, width, height, transform = {}) {
   const zoom = Math.max(1, Math.min(2, Number(transform.zoom) || 1));
   const brightness = Math.max(50, Math.min(150, Number(transform.brightness) || 100));
   const contrast = Math.max(50, Math.min(150, Number(transform.contrast) || 100));
+  const sourceWidth = source.naturalWidth || source.width;
+  const sourceHeight = source.naturalHeight || source.height;
+  const scale = Math.max(width / sourceWidth, height / sourceHeight) * zoom;
   context.save();
   context.filter = `brightness(${brightness}%) contrast(${contrast}%)`;
   context.translate(width / 2, height / 2);
-  context.scale(zoom * (transform.flipX ? -1 : 1), zoom);
-  context.drawImage(source, -width / 2, -height / 2, width, height);
+  context.scale(transform.flipX ? -1 : 1, 1);
+  context.drawImage(
+    source,
+    (-sourceWidth * scale) / 2,
+    (-sourceHeight * scale) / 2,
+    sourceWidth * scale,
+    sourceHeight * scale,
+  );
   context.restore();
 }
 
@@ -150,6 +168,51 @@ function isGif(bytes) {
   return signature === "GIF87a" || signature === "GIF89a";
 }
 
+export async function inspectMedia(source) {
+  const sourceBlob = await loadSourceBlob(source);
+  if (!isGif(await sourceBlob.slice(0, 6).arrayBuffer())) {
+    const url = URL.createObjectURL(sourceBlob);
+    try {
+      const image = new globalThis.Image();
+      image.src = url;
+      if (typeof image.decode === "function") {
+        await image.decode();
+      } else {
+        await new Promise((resolve, reject) => {
+          image.onload = resolve;
+          image.onerror = () => reject(new Error("The image could not be decoded."));
+        });
+      }
+      return {
+        isGif: false,
+        durationMs: 0,
+        frameCount: 1,
+        width: image.naturalWidth,
+        height: image.naturalHeight,
+      };
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+  let parsedGif;
+  try {
+    parsedGif = parseGIF(await sourceBlob.arrayBuffer());
+  } catch (cause) {
+    throw new Error("The GIF file could not be decoded.", { cause });
+  }
+  const frames = parsedGif.frames.filter((frame) => frame.image);
+  return {
+    isGif: true,
+    durationMs: frames.reduce(
+      (duration, frame) => duration + Math.max(20, Number(frame.gce?.delay || 10) * 10),
+      0,
+    ),
+    frameCount: frames.length,
+    width: parsedGif.lsd.width,
+    height: parsedGif.lsd.height,
+  };
+}
+
 async function encodeGif(sourceBlob, captions) {
   if (sourceBlob.size > MAX_GIF_BYTES) {
     throw new Error("This GIF is too large to edit in the browser.");
@@ -164,6 +227,8 @@ async function encodeGif(sourceBlob, captions) {
   }
 
   const { width, height } = parsedGif.lsd;
+  const outputWidth = Math.max(1, Math.min(1200, Math.round(captions.outputWidth || width)));
+  const outputHeight = Math.max(1, Math.min(1200, Math.round(captions.outputHeight || height)));
   const frameCount = parsedGif.frames.filter((frame) => frame.image).length;
   const totalFramePixels = width * height * frameCount;
   if (
@@ -179,14 +244,32 @@ async function encodeGif(sourceBlob, captions) {
 
   const frames = decompressFrames(parsedGif, true);
   const base = createCanvas(width, height);
-  const output = createCanvas(width, height);
+  const output = createCanvas(outputWidth, outputHeight);
   const patch = createCanvas(1, 1);
   const encoder = GIFEncoder();
+  const totalDurationMs = frames.reduce((duration, frame) =>
+    duration + Math.max(20, frame.delay ?? 100), 0);
+  const trimStartMs = Math.max(0, Number(captions.trimStartMs) || 0);
+  const trimEndMs = Math.min(
+    totalDurationMs,
+    Number(captions.trimEndMs) || totalDurationMs,
+  );
+  if (trimEndMs <= trimStartMs) {
+    throw new Error("Choose a timeline range that includes at least one frame.");
+  }
+  const speed = Math.max(0.25, Math.min(4, Number(captions.speed) || 1));
+  const reverse = Boolean(captions.reverse);
+  if (reverse && outputWidth * outputHeight * frameCount > 6_000_000) {
+    throw new Error("Reverse playback is limited to smaller GIFs to protect browser memory.");
+  }
+  const reversedFrames = [];
   base.context.fillStyle = "#fff";
   base.context.fillRect(0, 0, width, height);
 
   let previousFrame = null;
   let restoreFrame = null;
+  let elapsedMs = 0;
+  let encodedCount = 0;
   for (let index = 0; index < frames.length; index += 1) {
     const frame = frames[index];
     if (previousFrame?.disposalType === 2) {
@@ -211,11 +294,25 @@ async function encodeGif(sourceBlob, captions) {
     patch.context.putImageData(patchImage, 0, 0);
     base.context.drawImage(patch.canvas, frame.dims.left, frame.dims.top);
 
+    const frameDelay = Math.max(20, frame.delay ?? 100);
+    const frameStartMs = elapsedMs;
+    const frameEndMs = elapsedMs + frameDelay;
+    elapsedMs = frameEndMs;
+    const clippedDelay = Math.max(
+      0,
+      Math.min(frameEndMs, trimEndMs) - Math.max(frameStartMs, trimStartMs),
+    );
+    if (!clippedDelay) {
+      previousFrame = frame;
+      restoreFrame = restoreBeforeDraw;
+      continue;
+    }
+
     drawTransformedSource(
       output.context,
       base.canvas,
-      width,
-      height,
+      outputWidth,
+      outputHeight,
       captions.transform,
     );
     drawMemeOverlays(
@@ -225,23 +322,30 @@ async function encodeGif(sourceBlob, captions) {
         { text: captions.bottomText, position: "bottom" },
       ],
       captions.strokes ?? [],
-      width,
-      height,
+      outputWidth,
+      outputHeight,
       captions.fontSizePercent,
+      Math.max(0, frameStartMs - trimStartMs),
     );
 
-    const frameData = output.context.getImageData(0, 0, width, height).data;
-    const palette = quantize(frameData, Math.max(2, Math.min(256, captions.colorCount ?? 256)));
-    const indexedFrame = applyPalette(
-      captions.dither ? ditherPixels(frameData, width, height) : frameData,
-      palette,
-    );
-    encoder.writeFrame(indexedFrame, width, height, {
-      palette,
-      delay: Math.max(20, Math.round(frame.delay ?? 100)),
-      dispose: 1,
-      ...(index === 0 ? { repeat: 0 } : {}),
-    });
+    const frameData = output.context.getImageData(0, 0, outputWidth, outputHeight).data;
+    const delay = Math.max(20, Math.round(clippedDelay / speed));
+    if (reverse) {
+      reversedFrames.push({ frameData: new Uint8ClampedArray(frameData), delay });
+    } else {
+      const palette = quantize(frameData, Math.max(2, Math.min(256, captions.colorCount ?? 256)));
+      const indexedFrame = applyPalette(
+        captions.dither ? ditherPixels(frameData, outputWidth, outputHeight) : frameData,
+        palette,
+      );
+      encoder.writeFrame(indexedFrame, outputWidth, outputHeight, {
+        palette,
+        delay,
+        dispose: 1,
+        ...(encodedCount === 0 ? { repeat: 0 } : {}),
+      });
+    }
+    encodedCount += 1;
 
     previousFrame = frame;
     restoreFrame = restoreBeforeDraw;
@@ -250,6 +354,22 @@ async function encodeGif(sourceBlob, captions) {
     }
   }
 
+  if (reverse) {
+    reversedFrames.reverse().forEach(({ frameData, delay }, index) => {
+      const palette = quantize(frameData, Math.max(2, Math.min(256, captions.colorCount ?? 256)));
+      const indexedFrame = applyPalette(
+        captions.dither ? ditherPixels(frameData, outputWidth, outputHeight) : frameData,
+        palette,
+      );
+      encoder.writeFrame(indexedFrame, outputWidth, outputHeight, {
+        palette,
+        delay,
+        dispose: 1,
+        ...(index === 0 ? { repeat: 0 } : {}),
+      });
+    });
+  }
+  if (!encodedCount) throw new Error("The selected timeline range does not include any GIF frames.");
   encoder.finish();
   return new Blob([encoder.bytes()], { type: "image/gif" });
 }
@@ -272,8 +392,15 @@ async function encodeImage(sourceBlob, captions) {
       });
     }
 
-    const { naturalWidth: width, naturalHeight: height } = image;
-    if (!width || !height || width * height > MAX_GIF_PIXELS) {
+    const { naturalWidth: sourceWidth, naturalHeight: sourceHeight } = image;
+    const width = Math.max(1, Math.min(1200, Math.round(captions.outputWidth || sourceWidth)));
+    const height = Math.max(1, Math.min(1200, Math.round(captions.outputHeight || sourceHeight)));
+    if (
+      !sourceWidth ||
+      !sourceHeight ||
+      sourceWidth * sourceHeight > MAX_GIF_PIXELS ||
+      width * height > MAX_GIF_PIXELS
+    ) {
       throw new Error("This image is too large to edit in the browser.");
     }
 

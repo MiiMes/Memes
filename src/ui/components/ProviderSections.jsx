@@ -14,6 +14,7 @@ export function ProviderSections({
   isFavorite,
   onToggleFavorite,
   onEdit,
+  onFindSimilar,
   layout = "providers",
 }) {
   if (categoryView) {
@@ -73,6 +74,7 @@ export function ProviderSections({
                 isFavorite={isFavorite(item)}
                 onToggleFavorite={onToggleFavorite}
                 onEdit={onEdit}
+                onFindSimilar={onFindSimilar}
               />
             ))}
           </div>
@@ -107,6 +109,7 @@ export function ProviderSections({
                     isFavorite={isFavorite(item)}
                     onToggleFavorite={onToggleFavorite}
                     onEdit={onEdit}
+                    onFindSimilar={onFindSimilar}
                   />
                 ))}
               </div>

@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   PROVIDERS,
   TRENDING_SEARCH_PROVIDERS,
@@ -7,6 +7,7 @@ import { getLogicalRoute } from "../utils/routes.js";
 import { useFavorites } from "./useFavorites.js";
 import { useHashRoute } from "./useHashRoute.js";
 import { useProviderQueries } from "./useProviderQueries.js";
+import { rankSimilarMedia } from "../services/visualSimilarity.js";
 
 const RECENT_SEARCHES_KEY = "memes:recent-searches:v1";
 
@@ -47,6 +48,14 @@ export function useAppController() {
   const [apiRunId, setApiRunId] = useState(0);
   const [copied, setCopied] = useState(false);
   const [resultsLayout, setResultsLayout] = useState("providers");
+  const [similarityState, setSimilarityState] = useState({
+    reference: null,
+    results: [],
+    loading: false,
+    error: "",
+    skipped: 0,
+  });
+  const similarityRequestRef = useRef(0);
   const [recentSearchState, setRecentSearchState] = useState(loadRecentSearches);
   const { searches: recentSearches, error: recentSearchError } = recentSearchState;
 
@@ -137,6 +146,50 @@ export function useAppController() {
   }
 
   const visibleResults = mediaQuery.data ?? {};
+  async function findSimilar(reference) {
+    const requestId = similarityRequestRef.current + 1;
+    similarityRequestRef.current = requestId;
+    setSimilarityState({
+      reference,
+      results: [],
+      loading: true,
+      error: "",
+      skipped: 0,
+    });
+    const candidates = [
+      ...Object.values(visibleResults).flatMap((result) => result?.items ?? []),
+      ...favorites,
+    ];
+    try {
+      const ranked = await rankSimilarMedia(reference, candidates);
+      if (requestId !== similarityRequestRef.current) return;
+      setSimilarityState({
+        reference,
+        results: ranked.results,
+        loading: false,
+        error: ranked.results.length
+          ? ""
+          : ranked.skipped
+            ? `No comparable images were readable. ${ranked.skipped} candidate image(s) may restrict local pixel access.`
+            : "No comparable loaded images were found.",
+        skipped: ranked.skipped,
+      });
+    } catch (cause) {
+      if (requestId !== similarityRequestRef.current) return;
+      setSimilarityState({
+        reference,
+        results: [],
+        loading: false,
+        error: cause instanceof Error ? cause.message : String(cause),
+        skipped: 0,
+      });
+    }
+  }
+
+  function clearSimilarResults() {
+    similarityRequestRef.current += 1;
+    setSimilarityState({ reference: null, results: [], loading: false, error: "", skipped: 0 });
+  }
   const visibleTrendingSearches = trendingQuery.data ?? {};
   const trendingSearchItems = Object.fromEntries(
     TRENDING_SEARCH_PROVIDERS.map((provider) => [
@@ -219,6 +272,7 @@ export function useAppController() {
     consoleRoute, consoleJson, copied, copyJson, submitSearch, chooseSearch,
     recentSearches, recentSearchError, clearRecentSearches,
     resultsLayout, setResultsLayout,
+    similarityState, findSimilar, clearSimilarResults,
     toggleProvider, runApi: () => setApiRunId((current) => current + 1),
     clearLogs: () => setLogs([]),
   };

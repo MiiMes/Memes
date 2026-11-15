@@ -10,6 +10,7 @@ export function FavoritesSection({
   isFavorite,
   onToggleFavorite,
   onEdit,
+  onFindSimilar,
 }) {
   const [collectionName, setCollectionName] = useState("");
   const [actionError, setActionError] = useState("");
@@ -105,6 +106,7 @@ export function FavoritesSection({
                   isFavorite={isFavorite(item)}
                   onToggleFavorite={onToggleFavorite}
                   onEdit={onEdit}
+                  onFindSimilar={onFindSimilar}
                 />
                 <div className="favorite-details">
                   <label>

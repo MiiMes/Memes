@@ -43,6 +43,8 @@ export function MediaCard({
   isFavorite = false,
   onToggleFavorite,
   onEdit,
+  onFindSimilar,
+  similarityScore,
 }) {
   const videoRef = useRef(null);
   const copyFeedbackTimer = useRef(null);
@@ -123,6 +125,8 @@ export function MediaCard({
     !item.video && typeof onToggleFavorite === "function";
   const canEdit = item.kind === "gif" && Boolean(item.imageUrl) &&
     !item.video && typeof onEdit === "function";
+  const canFindSimilar = Boolean(item.imageUrl) && !item.video &&
+    typeof onFindSimilar === "function";
 
   const content = item.video ? (
     <video
@@ -159,6 +163,9 @@ export function MediaCard({
         disabled={copyFeedback?.tone === "pending"}
       >
         {content}
+        {typeof similarityScore === "number" && (
+          <span className="similarity-score">{similarityScore}% visual match</span>
+        )}
         {copyFeedback && (
           <span className={`copy-feedback ${copyFeedback.tone}`} role="status">
             {copyFeedback.message}
@@ -194,6 +201,17 @@ export function MediaCard({
           onClick={() => onEdit(item)}
         >
           <span aria-hidden="true">✎</span>
+        </button>
+      )}
+      {canFindSimilar && (
+        <button
+          className="similar-meme-button"
+          type="button"
+          aria-label={`Find images similar to ${item.title}`}
+          title="Find similar images"
+          onClick={() => onFindSimilar(item)}
+        >
+          <span aria-hidden="true">⌕</span>
         </button>
       )}
     </article>

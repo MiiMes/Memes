@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { copyAnimatedGifToClipboard } from "../services/clipboard.js";
 import { deleteMemeDraft, readMemeDrafts, saveMemeDraft } from "../services/favorites.js";
-import { createCaptionedMedia, drawMemeOverlays } from "../services/memeEditor.js";
+import { createCaptionedMedia, drawMemeOverlays, inspectMedia } from "../services/memeEditor.js";
+import { createMemeProject, readMemeProject } from "../services/memeProject.js";
+
+const EXPORT_PRESETS = {
+  original: null,
+  square: { width: 512, height: 512, label: "Square · 1:1" },
+  landscape: { width: 640, height: 480, label: "Landscape · 4:3" },
+  portrait: { width: 480, height: 600, label: "Portrait · 4:5" },
+  story: { width: 540, height: 960, label: "Story · 9:16" },
+};
 
 function createGeneratedFavoriteId() {
   const uniqueId = globalThis.crypto?.randomUUID?.() ??
@@ -24,6 +33,16 @@ export function MemeEditor({
   const [fontSizePercent, setFontSizePercent] = useState(8);
   const [gifColorCount, setGifColorCount] = useState(256);
   const [gifDithering, setGifDithering] = useState(false);
+  const [timeline, setTimeline] = useState({
+    startMs: 0,
+    endMs: 0,
+    speed: 1,
+    reverse: false,
+  });
+  const [mediaInfo, setMediaInfo] = useState(null);
+  const [previewTimeMs, setPreviewTimeMs] = useState(0);
+  const [mediaInfoError, setMediaInfoError] = useState("");
+  const [outputPreset, setOutputPreset] = useState("original");
   const [strokes, setStrokes] = useState([]);
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawingColor, setDrawingColor] = useState("#ff765f");
@@ -50,12 +69,27 @@ export function MemeEditor({
   const [drafts, setDrafts] = useState([]);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [draftFeedback, setDraftFeedback] = useState("");
+  const [projectFeedback, setProjectFeedback] = useState("");
+  const projectFileRef = useRef(null);
+  const [variantCaptions, setVariantCaptions] = useState("");
+  const [variantItems, setVariantItems] = useState([]);
+  const [isGeneratingVariants, setIsGeneratingVariants] = useState(false);
+  const [variantError, setVariantError] = useState("");
+  const [copilotPrompt, setCopilotPrompt] = useState("");
+  const [copilotFeedback, setCopilotFeedback] = useState("");
+  const [faceFeedback, setFaceFeedback] = useState("");
+  const [isDetectingFaces, setIsDetectingFaces] = useState(false);
   const previewRef = useRef(null);
   const previewImageRef = useRef(null);
   const captionCanvasRef = useRef(null);
   const pointerActionRef = useRef(null);
   const sourceUrl = uploadedUrl || item?.imageUrl || "";
   const selectedText = textLayers.find((layer) => layer.id === selectedTextId);
+  const outputDimensions = EXPORT_PRESETS[outputPreset];
+  const selectedDurationMs = mediaInfo?.isGif
+    ? Math.max(20, timeline.endMs - timeline.startMs)
+    : 0;
+  const formatTime = (milliseconds) => `${(milliseconds / 1000).toFixed(1)}s`;
 
   useEffect(() => {
     let active = true;
@@ -72,6 +106,38 @@ export function MemeEditor({
   }, []);
 
   useEffect(() => {
+    if (!uploadedBlob && !sourceUrl) return undefined;
+    let active = true;
+    setMediaInfo(null);
+    setMediaInfoError("");
+    inspectMedia(uploadedBlob || sourceUrl).then((info) => {
+      if (!active) return;
+      setMediaInfo(info);
+      setTimeline((current) => {
+        const endMs = current.endMs
+          ? Math.min(current.endMs, info.durationMs)
+          : info.durationMs;
+        return {
+          ...current,
+          startMs: Math.min(current.startMs, Math.max(0, endMs - 20)),
+          endMs,
+        };
+      });
+    }).catch((cause) => {
+      if (active) {
+        setMediaInfoError(cause instanceof Error ? cause.message : String(cause));
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [sourceUrl, uploadedBlob]);
+
+  useEffect(() => {
+    setPreviewTimeMs((current) => Math.min(current, selectedDurationMs));
+  }, [selectedDurationMs]);
+
+  useEffect(() => {
     if (!outputUrl) return undefined;
     return () => URL.revokeObjectURL(outputUrl);
   }, [outputUrl]);
@@ -80,6 +146,10 @@ export function MemeEditor({
     if (!uploadedUrl) return undefined;
     return () => URL.revokeObjectURL(uploadedUrl);
   }, [uploadedUrl]);
+
+  useEffect(() => () => {
+    variantItems.forEach((variant) => URL.revokeObjectURL(variant.url));
+  }, [variantItems]);
 
   useEffect(() => {
     if (outputUrl) return undefined;
@@ -108,6 +178,7 @@ export function MemeEditor({
         image.naturalWidth,
         image.naturalHeight,
         fontSizePercent,
+        previewTimeMs,
       );
     }
 
@@ -127,11 +198,13 @@ export function MemeEditor({
       observer?.disconnect();
       if (!observer) globalThis.removeEventListener("resize", renderCaptionPreview);
     };
-  }, [fontSizePercent, outputUrl, sourceUrl, strokes, textLayers]);
+  }, [fontSizePercent, outputUrl, previewTimeMs, sourceUrl, strokes, textLayers]);
 
   function invalidateOutput() {
     setOutputUrl("");
     setOutputBlob(null);
+    setVariantItems([]);
+    setVariantError("");
     setGeneratedFavoriteItem(null);
     setExportError("");
     setCopyFeedback(null);
@@ -261,6 +334,8 @@ export function MemeEditor({
 
     setUploadedBlob(file);
     setUploadedUrl(URL.createObjectURL(file));
+    setTimeline({ startMs: 0, endMs: 0, speed: 1, reverse: false });
+    setVariantItems([]);
     setOutputUrl("");
     setOutputBlob(null);
     setGeneratedFavoriteItem(null);
@@ -289,6 +364,8 @@ export function MemeEditor({
         strokes,
         fontSizePercent,
         transform,
+        timeline,
+        outputPreset,
         gifColorCount,
         gifDithering,
         updatedAt: Date.now(),
@@ -303,6 +380,216 @@ export function MemeEditor({
     }
   }
 
+  async function getSourceBlob() {
+    if (uploadedBlob) return uploadedBlob;
+    const response = await fetch(sourceUrl);
+    if (!response.ok) throw new Error(`Image request returned HTTP ${response.status}.`);
+    return response.blob();
+  }
+
+  async function exportProject() {
+    try {
+      const sourceBlob = await getSourceBlob();
+      const blob = await createMemeProject(sourceBlob, {
+        textLayers,
+        strokes,
+        fontSizePercent,
+        transform,
+        timeline,
+        outputPreset,
+        gifColorCount,
+        gifDithering,
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "meme-project.meme";
+      link.click();
+      globalThis.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setProjectFeedback("Portable project downloaded.");
+    } catch (cause) {
+      setProjectFeedback(`Project could not be exported. ${cause instanceof Error ? cause.message : String(cause)}`);
+    }
+  }
+
+  async function importProject(file) {
+    if (!file) return;
+    try {
+      const project = await readMemeProject(file);
+      const { settings } = project;
+      setUploadedBlob(project.sourceBlob);
+      setUploadedUrl(URL.createObjectURL(project.sourceBlob));
+      setTextLayers(settings.textLayers);
+      setSelectedTextId(settings.textLayers[0]?.id ?? "top");
+      setStrokes(settings.strokes);
+      setFontSizePercent(Number(settings.fontSizePercent) || 8);
+      setTransform(settings.transform ?? { zoom: 1, brightness: 100, contrast: 100, flipX: false });
+      setTimeline(settings.timeline ?? { startMs: 0, endMs: 0, speed: 1, reverse: false });
+      setOutputPreset(EXPORT_PRESETS[settings.outputPreset] ? settings.outputPreset : "original");
+      setGifColorCount([128, 192, 256].includes(Number(settings.gifColorCount))
+        ? Number(settings.gifColorCount)
+        : 256);
+      setGifDithering(Boolean(settings.gifDithering));
+      invalidateOutput();
+      setProjectFeedback(`Loaded project from ${file.name}.`);
+    } catch (cause) {
+      setProjectFeedback(`Project could not be imported. ${cause instanceof Error ? cause.message : String(cause)}`);
+    }
+  }
+
+  async function generateCaptionIdeas() {
+    const languageModel = globalThis.LanguageModel ?? globalThis.ai?.languageModel;
+    if (typeof languageModel?.create !== "function") {
+      setCopilotFeedback("This browser does not expose its built-in on-device AI. Your text stays local; you can enter caption variants below.");
+      return;
+    }
+
+    setCopilotFeedback("Generating caption ideas on this device…");
+    let session;
+    try {
+      const availability = await languageModel.availability?.();
+      if (availability === "unavailable") {
+        throw new Error("The browser's on-device model is unavailable.");
+      }
+      session = await languageModel.create();
+      const ideaText = await session.prompt(
+        `Suggest four short, distinct meme captions for this idea: "${copilotPrompt.trim() || selectedText?.text || item?.title || "a funny reaction"}". Return only one caption per line, without numbering.`,
+      );
+      const suggestions = String(ideaText)
+        .split(/\n+/)
+        .map((line) => line.replace(/^\s*(?:[-*]|\d+[.)])\s*/, "").trim())
+        .filter(Boolean)
+        .slice(0, 4);
+      if (!suggestions.length) throw new Error("The on-device model returned no caption ideas.");
+      setVariantCaptions(suggestions.join("\n"));
+      setCopilotFeedback("Caption ideas generated on-device. Review them before generating variants.");
+    } catch (cause) {
+      setCopilotFeedback(`On-device caption ideas failed. ${cause instanceof Error ? cause.message : String(cause)}`);
+    } finally {
+      session?.destroy?.();
+    }
+  }
+
+  async function generateVariants() {
+    const captions = [...new Set(variantCaptions.split("\n").map((line) => line.trim()).filter(Boolean))].slice(0, 4);
+    if (captions.length < 2) {
+      setVariantError("Enter at least two captions, one per line.");
+      return;
+    }
+    if (!selectedText) {
+      setVariantError("Choose a text layer to vary.");
+      return;
+    }
+    setIsGeneratingVariants(true);
+    setVariantError("");
+    const generated = [];
+    try {
+      const sourceBlob = await getSourceBlob();
+      for (const caption of captions) {
+        const layers = textLayers.map((layer) =>
+          layer.id === selectedText.id ? { ...layer, text: caption } : layer,
+        );
+        const blob = await createCaptionedMedia(sourceBlob, {
+          textLayers: layers,
+          strokes,
+          fontSizePercent,
+          transform,
+          trimStartMs: timeline.startMs,
+          trimEndMs: timeline.endMs,
+          speed: timeline.speed,
+          reverse: timeline.reverse,
+          ...(outputDimensions
+            ? { outputWidth: outputDimensions.width, outputHeight: outputDimensions.height }
+            : {}),
+          colorCount: gifColorCount,
+          dither: gifDithering,
+        });
+        generated.push({ caption, blob, url: URL.createObjectURL(blob) });
+      }
+      setVariantItems(generated);
+    } catch (cause) {
+      generated.forEach((variant) => URL.revokeObjectURL(variant.url));
+      setVariantError(`Variants could not be generated. ${cause instanceof Error ? cause.message : String(cause)}`);
+    } finally {
+      setIsGeneratingVariants(false);
+    }
+  }
+
+  function useVariant(variant) {
+    setOutputUrl(URL.createObjectURL(variant.blob));
+    setOutputBlob(variant.blob);
+    setGeneratedFavoriteItem(variant.blob.type === "image/gif" ? {
+      id: createGeneratedFavoriteId(),
+      title: `Edited ${item?.title || "GIF"}`,
+      imageUrl: item?.imageUrl || "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=",
+      provider: "meme-editor",
+      kind: "gif",
+    } : null);
+    setIsPreviewOpen(true);
+    setOutputActionFeedback(`Selected variant: “${variant.caption}”.`);
+  }
+
+  async function suggestFaceSafePlacement() {
+    const FaceDetectorApi = globalThis.FaceDetector;
+    const image = previewImageRef.current;
+    if (typeof FaceDetectorApi !== "function") {
+      setFaceFeedback("Face detection is not available in this browser. Drag the selected layer to position it manually.");
+      return;
+    }
+    if (!image?.naturalWidth || !selectedText) {
+      setFaceFeedback("Load an image and select a text or sticker layer first.");
+      return;
+    }
+    setIsDetectingFaces(true);
+    setFaceFeedback("");
+    try {
+      const detector = new FaceDetectorApi({ fastMode: true, maxDetectedFaces: 10 });
+      const faces = await detector.detect(image);
+      if (!faces.length) {
+        setFaceFeedback("No faces found. Drag the layer manually or try another frame.");
+        return;
+      }
+
+      const candidates = [
+        { x: 0.5, y: 0.12 },
+        { x: 0.5, y: 0.88 },
+        { x: 0.5, y: 0.5 },
+      ];
+      const scoredCandidates = candidates.map((candidate) => {
+        const textBox = {
+          left: candidate.x - 0.42,
+          right: candidate.x + 0.42,
+          top: candidate.y - 0.08,
+          bottom: candidate.y + 0.08,
+        };
+        const overlap = faces.reduce((score, face) => {
+          const box = face.boundingBox;
+          const faceBox = {
+            left: box.x / image.naturalWidth,
+            right: (box.x + box.width) / image.naturalWidth,
+            top: box.y / image.naturalHeight,
+            bottom: (box.y + box.height) / image.naturalHeight,
+          };
+          const width = Math.max(0, Math.min(textBox.right, faceBox.right) - Math.max(textBox.left, faceBox.left));
+          const height = Math.max(0, Math.min(textBox.bottom, faceBox.bottom) - Math.max(textBox.top, faceBox.top));
+          return score + width * height;
+        }, 0);
+        return { ...candidate, overlap };
+      }).sort((left, right) => left.overlap - right.overlap);
+      const placement = scoredCandidates[0];
+      updateTextLayer(selectedText.id, {
+        x: placement.x,
+        y: placement.y,
+        position: "custom",
+      });
+      setFaceFeedback("Suggested a low-overlap position using face detection on this device.");
+    } catch (cause) {
+      setFaceFeedback(`Face detection failed. ${cause instanceof Error ? cause.message : String(cause)}`);
+    } finally {
+      setIsDetectingFaces(false);
+    }
+  }
+
   function loadDraft(draft) {
     setUploadedBlob(draft.sourceBlob);
     setUploadedUrl(URL.createObjectURL(draft.sourceBlob));
@@ -311,10 +598,13 @@ export function MemeEditor({
     setStrokes(draft.strokes);
     setFontSizePercent(draft.fontSizePercent);
     setTransform(draft.transform);
+    setTimeline(draft.timeline ?? { startMs: 0, endMs: 0, speed: 1, reverse: false });
+    setOutputPreset(draft.outputPreset ?? "original");
     setGifColorCount(draft.gifColorCount);
     setGifDithering(draft.gifDithering);
     setOutputUrl("");
     setOutputBlob(null);
+    setVariantItems([]);
     setGeneratedFavoriteItem(null);
     setDraftFeedback(`Loaded “${draft.title}”.`);
   }
@@ -346,6 +636,13 @@ export function MemeEditor({
         strokes,
         fontSizePercent,
         transform,
+        trimStartMs: timeline.startMs,
+        trimEndMs: timeline.endMs,
+        speed: timeline.speed,
+        reverse: timeline.reverse,
+        ...(outputDimensions
+          ? { outputWidth: outputDimensions.width, outputHeight: outputDimensions.height }
+          : {}),
         colorCount: gifColorCount,
         dither: gifDithering,
       });
@@ -449,6 +746,47 @@ export function MemeEditor({
             }}
           />
         </label>
+        <div className="meme-editor-project-tools">
+          <button
+            className="meme-editor-secondary"
+            type="button"
+            onClick={exportProject}
+            disabled={!sourceUrl && !uploadedBlob}
+          >
+            Export portable project
+          </button>
+          <button
+            className="meme-editor-secondary"
+            type="button"
+            onClick={() => projectFileRef.current?.click()}
+          >
+            Import project
+          </button>
+          <input
+            ref={projectFileRef}
+            type="file"
+            accept=".meme,application/json,application/vnd.memes.project+json"
+            onChange={(event) => {
+              void importProject(event.target.files[0]);
+              event.target.value = "";
+            }}
+            hidden
+          />
+        </div>
+        {projectFeedback && <p className="meme-editor-copy-feedback" role="status">{projectFeedback}</p>}
+        {drafts.length > 0 && (
+          <div className="meme-editor-drafts">
+            <strong>Saved drafts</strong>
+            {drafts.map((draft) => (
+              <div className="meme-editor-draft" key={draft.id}>
+                <span>{draft.title}</span>
+                <button type="button" onClick={() => loadDraft(draft)}>Load</button>
+                <button type="button" onClick={() => removeDraft(draft)} aria-label={`Delete ${draft.title}`}>×</button>
+              </div>
+            ))}
+          </div>
+        )}
+        {draftFeedback && <p className="meme-editor-copy-feedback" role="status">{draftFeedback}</p>}
         <button className="meme-editor-secondary" type="button" onClick={onClose}>
           Back to GIFs
         </button>
@@ -463,6 +801,13 @@ export function MemeEditor({
         <div
           className="meme-editor-preview"
           ref={previewRef}
+          style={outputDimensions ? {
+            aspectRatio: `${outputDimensions.width} / ${outputDimensions.height}`,
+            maxWidth: `min(100%, ${72 * outputDimensions.width / outputDimensions.height}vh)`,
+            maxHeight: "72vh",
+            minHeight: 0,
+            justifySelf: "center",
+          } : undefined}
           onDragOver={(event) => event.preventDefault()}
           onDrop={(event) => {
             event.preventDefault();
@@ -493,6 +838,9 @@ export function MemeEditor({
             style={{
               filter: `brightness(${transform.brightness}%) contrast(${transform.contrast}%)`,
               transform: `scale(${transform.zoom})${transform.flipX ? " scaleX(-1)" : ""}`,
+              ...(outputDimensions
+                ? { width: "100%", height: "100%", maxHeight: "none", objectFit: "cover" }
+                : {}),
             }}
           />
           {!outputUrl && (
@@ -504,7 +852,11 @@ export function MemeEditor({
           )}
         </div>
         <p className="meme-editor-preview-note">
-          {outputUrl ? "Previewing your animated GIF." : "Caption preview updates as you type."}
+          {outputUrl
+            ? "Previewing your generated meme."
+            : outputDimensions
+              ? "Preview is cropped to the selected export aspect ratio."
+              : "Caption preview updates as you type."}
         </p>
       </div>
       <form className="meme-editor-controls" onSubmit={createMeme}>
@@ -523,6 +875,108 @@ export function MemeEditor({
             }}
           />
         </label>
+        <div className="meme-editor-project-tools">
+          <button
+            className="meme-editor-secondary"
+            type="button"
+            onClick={exportProject}
+            disabled={!sourceUrl && !uploadedBlob}
+          >
+            Export portable project
+          </button>
+          <button
+            className="meme-editor-secondary"
+            type="button"
+            onClick={() => projectFileRef.current?.click()}
+          >
+            Import project
+          </button>
+          <input
+            ref={projectFileRef}
+            type="file"
+            accept=".meme,application/json,application/vnd.memes.project+json"
+            onChange={(event) => {
+              void importProject(event.target.files[0]);
+              event.target.value = "";
+            }}
+            hidden
+          />
+        </div>
+        {projectFeedback && <p className="meme-editor-copy-feedback" role="status">{projectFeedback}</p>}
+        {mediaInfoError && <p className="meme-editor-error" role="status">{mediaInfoError}</p>}
+        {mediaInfo?.isGif && (
+          <div className="meme-editor-timeline">
+            <strong>GIF timeline · {mediaInfo.frameCount} frames · {formatTime(mediaInfo.durationMs)}</strong>
+            <label className="meme-editor-field">
+              <span>Trim start <strong>{formatTime(timeline.startMs)}</strong></span>
+              <input
+                type="range"
+                min="0"
+                max={Math.max(0, timeline.endMs - 20)}
+                step="10"
+                value={timeline.startMs}
+                onChange={(event) => {
+                  setTimeline((current) => ({ ...current, startMs: Number(event.target.value) }));
+                  invalidateOutput();
+                }}
+              />
+            </label>
+            <label className="meme-editor-field">
+              <span>Trim end <strong>{formatTime(timeline.endMs)}</strong></span>
+              <input
+                type="range"
+                min={timeline.startMs + 20}
+                max={mediaInfo.durationMs}
+                step="10"
+                value={timeline.endMs || mediaInfo.durationMs}
+                onChange={(event) => {
+                  setTimeline((current) => ({ ...current, endMs: Number(event.target.value) }));
+                  invalidateOutput();
+                }}
+              />
+            </label>
+            <label className="meme-editor-field">
+              <span>Preview layer timing <strong>{formatTime(previewTimeMs)}</strong></span>
+              <input
+                type="range"
+                min="0"
+                max={selectedDurationMs}
+                step="10"
+                value={previewTimeMs}
+                onChange={(event) => setPreviewTimeMs(Number(event.target.value))}
+              />
+            </label>
+            <div className="meme-editor-timeline-options">
+              <label className="meme-editor-field">
+                <span>Playback speed</span>
+                <select
+                  value={timeline.speed}
+                  onChange={(event) => {
+                    setTimeline((current) => ({ ...current, speed: Number(event.target.value) }));
+                    invalidateOutput();
+                  }}
+                >
+                  <option value="0.5">0.5× slower</option>
+                  <option value="0.75">0.75×</option>
+                  <option value="1">Normal</option>
+                  <option value="1.5">1.5×</option>
+                  <option value="2">2× faster</option>
+                </select>
+              </label>
+              <label className="meme-editor-draw-toggle">
+                <input
+                  type="checkbox"
+                  checked={timeline.reverse}
+                  onChange={(event) => {
+                    setTimeline((current) => ({ ...current, reverse: event.target.checked }));
+                    invalidateOutput();
+                  }}
+                />
+                Reverse playback
+              </label>
+            </div>
+          </div>
+        )}
         <div className="meme-editor-layer-list" role="group" aria-label="Text and sticker layers">
           {textLayers.map((layer) => (
             <div className="meme-editor-layer-item" key={layer.id}>
@@ -628,6 +1082,45 @@ export function MemeEditor({
                 disabled={isExporting}
               />
             </label>
+            {mediaInfo?.isGif && (
+              <div className="meme-editor-layer-timing">
+                <strong>Layer timing within trimmed clip</strong>
+                <div>
+                  <label className="meme-editor-field">
+                    <span>Show from (seconds)</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max={(selectedDurationMs / 1000).toFixed(1)}
+                      step="0.1"
+                      value={((selectedText.startMs ?? 0) / 1000).toFixed(1)}
+                      onChange={(event) => updateTextLayer(selectedText.id, {
+                        startMs: Math.min(
+                          Math.max(0, Number(event.target.value) * 1000),
+                          selectedText.endMs ?? selectedDurationMs,
+                        ),
+                      })}
+                    />
+                  </label>
+                  <label className="meme-editor-field">
+                    <span>Hide after (seconds)</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max={(selectedDurationMs / 1000).toFixed(1)}
+                      step="0.1"
+                      value={((selectedText.endMs ?? selectedDurationMs) / 1000).toFixed(1)}
+                      onChange={(event) => updateTextLayer(selectedText.id, {
+                        endMs: Math.max(
+                          selectedText.startMs ?? 0,
+                          Math.min(selectedDurationMs, Number(event.target.value) * 1000),
+                        ),
+                      })}
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
           </>
         )}
         <label className="meme-editor-field meme-font-size">
@@ -691,6 +1184,69 @@ export function MemeEditor({
           )}
         </>
         )}
+        <div className="meme-editor-copilot">
+          <strong>On-device Meme Copilot</strong>
+          <label className="meme-editor-field">
+            <span>Idea or mood</span>
+            <input
+              value={copilotPrompt}
+              onChange={(event) => setCopilotPrompt(event.target.value)}
+              maxLength={180}
+              placeholder="e.g. awkward meeting energy"
+            />
+          </label>
+          <button
+            className="meme-editor-secondary"
+            type="button"
+            onClick={generateCaptionIdeas}
+            disabled={isGeneratingVariants || isExporting}
+          >
+            Suggest captions on this device
+          </button>
+          <small>The browser’s built-in AI is optional and may not be available. Captions are not sent to a server.</small>
+          {copilotFeedback && <p className="meme-editor-copy-feedback" role="status">{copilotFeedback}</p>}
+        </div>
+        <div className="meme-editor-variants">
+          <strong>Batch variations</strong>
+          <label className="meme-editor-field">
+            <span>One caption per line (up to 4)</span>
+            <textarea
+              value={variantCaptions}
+              onChange={(event) => {
+                setVariantCaptions(event.target.value);
+                setVariantItems([]);
+              }}
+              maxLength={500}
+              placeholder={"When the meeting could have been an email\nMe pretending I understood the assignment"}
+            />
+          </label>
+          <button
+            className="meme-editor-secondary"
+            type="button"
+            onClick={generateVariants}
+            disabled={isGeneratingVariants || isExporting}
+          >
+            {isGeneratingVariants ? "Generating variations…" : "Generate variations"}
+          </button>
+          {variantError && <p className="meme-editor-error" role="alert">{variantError}</p>}
+          {variantItems.length > 0 && (
+            <div className="meme-editor-variant-grid">
+              {variantItems.map((variant) => (
+                <article key={variant.caption}>
+                  <img src={variant.url} alt={variant.caption} />
+                  <p>{variant.caption}</p>
+                  <button
+                    className="meme-editor-secondary"
+                    type="button"
+                    onClick={() => useVariant(variant)}
+                  >
+                    Use this version
+                  </button>
+                </article>
+              ))}
+            </div>
+          )}
+        </div>
         <div className="meme-editor-sticker-tools">
           <strong>Stickers</strong>
           {["😂", "🔥", "❤️", "✨", "💀", "👍"].map((sticker) => (
@@ -707,6 +1263,15 @@ export function MemeEditor({
         </div>
         <div className="meme-editor-image-tools">
           <strong>Image</strong>
+          <button
+            className="meme-editor-secondary"
+            type="button"
+            onClick={suggestFaceSafePlacement}
+            disabled={isDetectingFaces || !selectedText}
+          >
+            {isDetectingFaces ? "Detecting faces…" : "Suggest face-safe placement"}
+          </button>
+          {faceFeedback && <p className="meme-editor-copy-feedback" role="status">{faceFeedback}</p>}
           <button
             className="meme-editor-secondary"
             type="button"
@@ -775,6 +1340,26 @@ export function MemeEditor({
             Reduce color banding (dithering)
           </label>
           <small>Dithering can add texture and increase file size. GIF output is limited to 256 colors per frame.</small>
+        </div>
+        <div className="meme-editor-export-preset">
+          <strong>Export format</strong>
+          <label className="meme-editor-field">
+            <span>Canvas size</span>
+            <select
+              value={outputPreset}
+              onChange={(event) => {
+                setOutputPreset(event.target.value);
+                invalidateOutput();
+              }}
+            >
+              {Object.entries(EXPORT_PRESETS).map(([key, preset]) => (
+                <option key={key} value={key}>
+                  {preset?.label ?? `Original · ${mediaInfo?.width ?? "source"}×${mediaInfo?.height ?? "source"}`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <small>Preset exports center-crop to fill the selected aspect ratio.</small>
         </div>
         <div className="meme-editor-drafts">
           <strong>Local drafts</strong>
@@ -852,14 +1437,20 @@ export function MemeEditor({
           )}
         </div>
         {outputBlob && (
-          <div className="meme-editor-output-actions">
-            <button className="meme-editor-secondary" type="button" onClick={downloadMeme}>
-              Download {outputBlob.type === "image/gif" ? "GIF" : "PNG"}
-            </button>
-            <button className="meme-editor-secondary" type="button" onClick={shareMeme}>
-              Share meme
-            </button>
-          </div>
+          <>
+            <div className="meme-editor-output-actions">
+              <button className="meme-editor-secondary" type="button" onClick={downloadMeme}>
+                Download {outputBlob.type === "image/gif" ? "GIF" : "PNG"}
+              </button>
+              <button className="meme-editor-secondary" type="button" onClick={shareMeme}>
+                Share meme
+              </button>
+            </div>
+            <p className="meme-editor-export-info" role="status">
+              {outputDimensions?.width ?? mediaInfo?.width ?? "?"} × {outputDimensions?.height ?? mediaInfo?.height ?? "?"}
+              {" · "}{(outputBlob.size / 1024).toFixed(1)} KB · {outputBlob.type === "image/gif" ? "Animated GIF" : "PNG image"}
+            </p>
+          </>
         )}
         {outputActionFeedback && <p className="meme-editor-copy-feedback" role="status">{outputActionFeedback}</p>}
         {copyFeedback && (

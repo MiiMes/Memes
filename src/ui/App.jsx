@@ -10,6 +10,8 @@ import { MemeEditor } from "./components/MemeEditor.jsx";
 import { MediaSwitch, ProviderFilters } from "./components/MediaComponents.jsx";
 import { ProviderSections } from "./components/ProviderSections.jsx";
 import { ReactionSections } from "./components/ReactionSections.jsx";
+import { SimilarResults } from "./components/SimilarResults.jsx";
+import { PwaStatus } from "./components/PwaStatus.jsx";
 import { TrendingSearchStrip } from "./components/TrendingSearchStrip.jsx";
 import { useAppController } from "./hooks/useAppController.js";
 
@@ -44,6 +46,7 @@ function MemeApp() {
     editorItem, openEditor, closeEditor,
     recentSearches, recentSearchError, clearRecentSearches,
     resultsLayout, setResultsLayout,
+    similarityState, findSimilar, clearSimilarResults,
   } = useAppController();
   const pageHeading = page === "explore"
     ? "Explore"
@@ -67,6 +70,7 @@ function MemeApp() {
           <a className={page === "favorites" ? "active" : ""} href="#/favorites">Favorites</a>
           <a className={page === "api" ? "active" : ""} href="#/api">API console</a>
         </nav>
+        <PwaStatus />
         <label className="locale-select">
           <span aria-hidden="true">◎</span>
           <select value={locale} onChange={(event) => setLocale(event.target.value)} aria-label="Language and region">
@@ -162,16 +166,27 @@ function MemeApp() {
               favoritesError={favoritesError}
             />
           ) : page === "favorites" ? (
-            <FavoritesSection
-              favorites={favorites}
-              collections={collections}
-              collectionsError={collectionsError}
-              onCreateCollection={createCollection}
-              onUpdateFavorite={updateFavorite}
-              isFavorite={isFavorite}
-              onToggleFavorite={toggleFavorite}
-              onEdit={openEditor}
-            />
+            <>
+              <SimilarResults
+                {...similarityState}
+                onClear={clearSimilarResults}
+                onFindSimilar={findSimilar}
+                isFavorite={isFavorite}
+                onToggleFavorite={toggleFavorite}
+                onEdit={openEditor}
+              />
+              <FavoritesSection
+                favorites={favorites}
+                collections={collections}
+                collectionsError={collectionsError}
+                onCreateCollection={createCollection}
+                onUpdateFavorite={updateFavorite}
+                isFavorite={isFavorite}
+                onToggleFavorite={toggleFavorite}
+                onEdit={openEditor}
+                onFindSimilar={findSimilar}
+              />
+            </>
           ) : (
             <>
               {page === "home" && (trendingSearchTerms.length > 0 || trendingSearchErrors.length > 0) && (
@@ -249,15 +264,26 @@ function MemeApp() {
                   logRequest={logRequest}
                 />
               ) : (
-                <ProviderSections
-                  providers={providers}
-                  results={visibleResults}
-                  loading={mediaQuery.isPending || mediaQuery.isFetching}
-                  layout={resultsLayout}
-                  isFavorite={isFavorite}
-                  onToggleFavorite={toggleFavorite}
-                  onEdit={openEditor}
-                />
+                <>
+                  <SimilarResults
+                    {...similarityState}
+                    onClear={clearSimilarResults}
+                    onFindSimilar={findSimilar}
+                    isFavorite={isFavorite}
+                    onToggleFavorite={toggleFavorite}
+                    onEdit={openEditor}
+                  />
+                  <ProviderSections
+                    providers={providers}
+                    results={visibleResults}
+                    loading={mediaQuery.isPending || mediaQuery.isFetching}
+                    layout={resultsLayout}
+                    isFavorite={isFavorite}
+                    onToggleFavorite={toggleFavorite}
+                    onEdit={openEditor}
+                    onFindSimilar={findSimilar}
+                  />
+                </>
               )}
             </>
           )}
