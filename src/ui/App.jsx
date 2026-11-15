@@ -613,6 +613,12 @@ function MemeApp() {
 
   const visibleResults = mediaQuery.data ?? {};
   const visibleTrendingSearches = trendingQuery.data ?? {};
+  const trendingSearchTerms = Object.entries(visibleTrendingSearches).flatMap(
+    ([provider, result]) => (result.items ?? []).slice(0, 5).map((term) => ({
+      ...term,
+      provider,
+    })),
+  ).slice(0, 8);
   const visibleCategories = categoriesQuery.data ?? {};
   const consoleRoute = getLogicalRoute(apiAction, {
     q: apiQuery.trim(),
@@ -697,20 +703,6 @@ function MemeApp() {
                   </button>
                 </form>
                 <ProviderFilters providers={providers} onToggle={toggleProvider} />
-                {Object.values(visibleTrendingSearches).some((entry) => entry.items?.length) && (
-                  <div className="trending-searches" role="group" aria-label="Trending searches">
-                    <span className="trending-label">TRENDING SEARCHES</span>
-                    {Object.entries(visibleTrendingSearches).flatMap(([provider, result]) =>
-                      (result.items ?? []).slice(0, 5).map((term, index) => (
-                        <button
-                          key={`${provider}-${term.query}-${index}`}
-                          onClick={() => chooseSearch(term.query)}
-                          title={`Trending on ${PROVIDER_NAMES[provider]}`}
-                        >{term.title}</button>
-                      )),
-                    ).slice(0, 8)}
-                  </div>
-                )}
               </>
             )}
           </div>
@@ -740,6 +732,14 @@ function MemeApp() {
             />
           ) : (
             <>
+              {page === "home" && trendingSearchTerms.length > 0 && (
+                <TrendingSearchStrip
+                  searches={trendingSearchTerms}
+                  locale={locale}
+                  logRequest={logRequest}
+                  onSelect={(term) => chooseSearch(term)}
+                />
+              )}
               <div className="section-heading">
                 <div>
                   <p className="eyebrow dark-eyebrow">
@@ -814,6 +814,89 @@ function MediaSwitch({ kind, setKind }) {
         </button>
       ))}
     </div>
+  );
+}
+
+function TrendingSearchStrip({ searches, locale, logRequest, onSelect }) {
+  return (
+    <section className="trending-search-section" aria-labelledby="trending-search-heading">
+      <div className="trending-search-heading">
+        <div>
+          <p className="eyebrow dark-eyebrow">WHAT'S POPULAR</p>
+          <h2 id="trending-search-heading">Trending searches</h2>
+        </div>
+      </div>
+      <div className="trending-search-strip">
+        {searches.map((term, index) => (
+          <TrendingSearchCard
+            key={`${term.provider}-${term.query}-${index}`}
+            term={term}
+            index={index}
+            locale={locale}
+            logRequest={logRequest}
+            onSelect={() => onSelect(term.query)}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function TrendingSearchCard({ term, index, locale, logRequest, onSelect }) {
+  const cardRef = useRef(null);
+  const [isVisible, setIsVisible] = useState(false);
+
+  useEffect(() => {
+    const card = cardRef.current;
+    if (!card) return undefined;
+    if (!("IntersectionObserver" in window)) {
+      setIsVisible(true);
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setIsVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "150px" },
+    );
+    observer.observe(card);
+    return () => observer.disconnect();
+  }, []);
+
+  const previewQuery = useQuery({
+    queryKey: ["trending-search-preview", term.provider, term.query, locale],
+    queryFn: () => requestProvider(
+      term.provider,
+      "search",
+      { q: term.query, kind: "gif", locale, limit: 1 },
+      logRequest,
+    ),
+    enabled: isVisible && providerIsConfigured(term.provider),
+    staleTime: 24 * 60 * 60 * 1000,
+    gcTime: 24 * 60 * 60 * 1000,
+  });
+  const imageUrl = previewQuery.data?.items?.[0]?.imageUrl;
+
+  return (
+    <button
+      ref={cardRef}
+      className="trending-search-card"
+      type="button"
+      onClick={onSelect}
+      aria-label={`Search for ${term.title}`}
+      title={`Trending on ${PROVIDER_NAMES[term.provider]}`}
+    >
+      <span className={`trending-search-art hue-${index % 6}`}>
+        {imageUrl
+          ? <img src={imageUrl} alt="" loading="lazy" />
+          : <span aria-hidden="true">{term.title}</span>}
+      </span>
+      <span className="trending-search-title">{term.title}</span>
+    </button>
   );
 }
 
