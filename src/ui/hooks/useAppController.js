@@ -11,6 +11,8 @@ import { useProviderQueries } from "./useProviderQueries.js";
 export function useAppController() {
   const { page, navigate } = useHashRoute();
   const { favorites, favoritesError, isFavorite, toggleFavorite } = useFavorites();
+  const [editorItem, setEditorItem] = useState(null);
+  const [editorReturnPage, setEditorReturnPage] = useState("home");
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
   const [kind, setKind] = useState("gif");
@@ -54,6 +56,16 @@ export function useAppController() {
     setQuery(term);
     setSubmittedQuery(term);
     navigate("home");
+  }
+
+  function openEditor(item) {
+    setEditorItem(item);
+    setEditorReturnPage(page === "editor" ? "home" : page);
+    navigate("editor");
+  }
+
+  function closeEditor() {
+    navigate(editorReturnPage);
   }
 
   function toggleProvider(provider) {
@@ -140,6 +152,7 @@ export function useAppController() {
     page, query, setQuery, submittedQuery, kind, setKind, locale, setLocale,
     providers, logs, logRequest, mediaQuery, visibleResults,
     favorites, favoritesError, isFavorite, toggleFavorite,
+    editorItem, openEditor, closeEditor,
     trendingSearchTerms, trendingSearchErrors, visibleCategories, categoriesQuery,
     apiAction, setApiAction, apiQuery, setApiQuery, apiQueryResult,
     consoleRoute, consoleJson, copied, copyJson, submitSearch, chooseSearch,

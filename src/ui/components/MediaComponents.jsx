@@ -42,6 +42,7 @@ export function MediaCard({
   copyOnClick = false,
   isFavorite = false,
   onToggleFavorite,
+  onEdit,
 }) {
   const videoRef = useRef(null);
   const copyFeedbackTimer = useRef(null);
@@ -120,6 +121,8 @@ export function MediaCard({
     : item.video ? `Play ${item.title} with sound` : `Search ${item.title}`;
   const canFavorite = item.kind === "gif" && Boolean(item.imageUrl) &&
     !item.video && typeof onToggleFavorite === "function";
+  const canEdit = item.kind === "gif" && Boolean(item.imageUrl) &&
+    !item.video && typeof onEdit === "function";
 
   const content = item.video ? (
     <video
@@ -180,6 +183,17 @@ export function MediaCard({
           onClick={() => onToggleFavorite(item)}
         >
           <span aria-hidden="true">{isFavorite ? "♥" : "♡"}</span>
+        </button>
+      )}
+      {canEdit && (
+        <button
+          className="edit-meme-button"
+          type="button"
+          aria-label={`Edit ${item.title} as a meme`}
+          title="Edit meme"
+          onClick={() => onEdit(item)}
+        >
+          <span aria-hidden="true">✎</span>
         </button>
       )}
     </article>

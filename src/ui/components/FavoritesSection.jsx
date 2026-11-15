@@ -1,6 +1,6 @@
 import { MediaCard } from "./MediaComponents.jsx";
 
-export function FavoritesSection({ favorites, isFavorite, onToggleFavorite }) {
+export function FavoritesSection({ favorites, isFavorite, onToggleFavorite, onEdit }) {
   return (
     <section className="favorites-section" aria-labelledby="favorites-heading">
       <header className="section-heading">
@@ -21,6 +21,7 @@ export function FavoritesSection({ favorites, isFavorite, onToggleFavorite }) {
               copyOnClick
               isFavorite={isFavorite(item)}
               onToggleFavorite={onToggleFavorite}
+              onEdit={onEdit}
             />
           ))}
         </div>

@@ -6,6 +6,7 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { LOCALES } from "./constants/appConstants.js";
 import { ApiConsole } from "./components/ApiConsole.jsx";
 import { FavoritesSection } from "./components/FavoritesSection.jsx";
+import { MemeEditor } from "./components/MemeEditor.jsx";
 import { MediaSwitch, ProviderFilters } from "./components/MediaComponents.jsx";
 import { ProviderSections } from "./components/ProviderSections.jsx";
 import { ReactionSections } from "./components/ReactionSections.jsx";
@@ -39,6 +40,7 @@ function MemeApp() {
     apiQuery, setApiQuery, apiQueryResult, consoleRoute, consoleJson, copied,
     copyJson, submitSearch, chooseSearch, toggleProvider, runApi, clearLogs,
     favorites, favoritesError, isFavorite, toggleFavorite,
+    editorItem, openEditor, closeEditor,
   } = useAppController();
   const pageHeading = page === "explore"
     ? "Explore"
@@ -46,6 +48,8 @@ function MemeApp() {
       ? "Reaction GIFs"
       : page === "favorites"
         ? "Favorites"
+        : page === "editor"
+          ? "Meme editor"
         : "API console";
 
   return (
@@ -85,6 +89,8 @@ function MemeApp() {
                     ? "Every feeling has a GIF. Find yours."
                     : page === "favorites"
                       ? "Your favorite GIFs, all in one place."
+                    : page === "editor"
+                      ? "Add captions to a GIF and export your animated meme."
                     : "Run provider requests and inspect JSON, status, and timing."}
             </p>
             {page === "home" && (
@@ -132,11 +138,14 @@ function MemeApp() {
               logs={logs}
               clearLogs={clearLogs}
             />
+          ) : page === "editor" ? (
+            <MemeEditor item={editorItem} onClose={closeEditor} />
           ) : page === "favorites" ? (
             <FavoritesSection
               favorites={favorites}
               isFavorite={isFavorite}
               onToggleFavorite={toggleFavorite}
+              onEdit={openEditor}
             />
           ) : (
             <>
@@ -201,6 +210,7 @@ function MemeApp() {
                   loading={mediaQuery.isPending || mediaQuery.isFetching}
                   isFavorite={isFavorite}
                   onToggleFavorite={toggleFavorite}
+                  onEdit={openEditor}
                 />
               )}
             </>
