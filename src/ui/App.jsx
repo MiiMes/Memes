@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   QueryClient,
   QueryClientProvider,
@@ -86,6 +86,14 @@ const PROVIDER_CONFIG = {
     key: import.meta.env.VITE_KLIPY_API_KEY ?? "",
   },
 };
+
+function providerIsConfigured(provider) {
+  if (provider === "giphy") return Boolean(PROVIDER_CONFIG.giphy.key);
+  if (provider === "tenor") {
+    return Boolean(PROVIDER_CONFIG.tenor.key && PROVIDER_CONFIG.tenor.clientKey);
+  }
+  return Boolean(PROVIDER_CONFIG.klipy.key);
+}
 
 function readPage() {
   const page = window.location.hash.replace(/^#\/?/, "").split("/")[0];
@@ -603,6 +611,8 @@ function MemeApp() {
                     setKind("gif");
                     chooseSearch(term, provider);
                   }}
+                  locale={locale}
+                  logRequest={logRequest}
                 />
               ) : page === "explore" ? (
                 <ProviderSections
@@ -729,12 +739,15 @@ function findReactionPreview(reaction, items) {
   )?.imageUrl;
 }
 
-function ReactionSections({ providers, results, loading, onSelect }) {
+function ReactionSections({ providers, results, loading, onSelect, locale, logRequest }) {
   if (!providers.length) {
     return <div className="empty-state">Choose at least one provider above to browse its reactions.</div>;
   }
   return (
     <div className="reaction-provider-list">
+      <p className="reaction-help">
+        Preview GIFs load as you scroll. Missing category thumbnails are fetched one at a time per reaction.
+      </p>
       {providers.map((provider) => {
         const reactions = REACTIONS_BY_PROVIDER[provider] ?? [];
         const previews = results[provider]?.items ?? [];
@@ -744,7 +757,7 @@ function ReactionSections({ providers, results, loading, onSelect }) {
               <span className={`provider-dot ${provider}`} />
               <h3>{PROVIDER_NAMES[provider]} reactions</h3>
               <span>{reactions.length} categories</span>
-              {loading && <span className="reaction-preview-status">Loading previews…</span>}
+              {loading && <span className="reaction-preview-status">Loading category data…</span>}
             </header>
             {results[provider]?.error && (
               <div className="reaction-preview-error">
@@ -755,20 +768,16 @@ function ReactionSections({ providers, results, loading, onSelect }) {
               {reactions.map((reaction, index) => {
                 const previewUrl = findReactionPreview(reaction, previews);
                 return (
-                  <button
-                    className="reaction-tile"
+                  <ReactionTile
                     key={`${provider}-${reaction}-${index}`}
-                    onClick={() => onSelect(reaction, provider)}
-                    aria-label={`Search ${PROVIDER_NAMES[provider]} for ${reaction}`}
-                  >
-                    <span className={`reaction-tile-art hue-${index % 6}`}>
-                      {previewUrl
-                        ? <img src={previewUrl} alt="" loading="lazy" />
-                        : <span aria-hidden="true">{["✦", "☺", "♥", "✳", "☁", "✧"][index % 6]}</span>}
-                      <span className="reaction-tile-arrow" aria-hidden="true">↗</span>
-                    </span>
-                    <span className="reaction-tile-name">{reaction}</span>
-                  </button>
+                    provider={provider}
+                    reaction={reaction}
+                    index={index}
+                    locale={locale}
+                    categoryPreview={previewUrl}
+                    logRequest={logRequest}
+                    onSelect={() => onSelect(reaction, provider)}
+                  />
                 );
               })}
             </div>
@@ -776,6 +785,88 @@ function ReactionSections({ providers, results, loading, onSelect }) {
         );
       })}
     </div>
+  );
+}
+
+function ReactionTile({
+  provider,
+  reaction,
+  index,
+  locale,
+  categoryPreview,
+  logRequest,
+  onSelect,
+}) {
+  const tileRef = useRef(null);
+  const [isVisible, setIsVisible] = useState(false);
+  const [categoryPreviewFailed, setCategoryPreviewFailed] = useState(false);
+  const [searchPreviewFailed, setSearchPreviewFailed] = useState(false);
+
+  useEffect(() => {
+    const tile = tileRef.current;
+    if (!tile) return undefined;
+    if (!("IntersectionObserver" in window)) {
+      setIsVisible(true);
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setIsVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "250px" },
+    );
+    observer.observe(tile);
+    return () => observer.disconnect();
+  }, []);
+
+  const previewQuery = useQuery({
+    queryKey: ["reaction-preview", provider, reaction, locale],
+    queryFn: () => requestProvider(
+      provider,
+      "search",
+      { q: reaction, kind: "gif", locale, limit: 1 },
+      logRequest,
+    ),
+    enabled: isVisible && providerIsConfigured(provider) && (!categoryPreview || categoryPreviewFailed),
+    staleTime: 24 * 60 * 60 * 1000,
+    gcTime: 24 * 60 * 60 * 1000,
+  });
+  const searchPreview = previewQuery.data?.items?.[0]?.imageUrl;
+  const imageUrl = categoryPreview && !categoryPreviewFailed
+    ? categoryPreview
+    : searchPreviewFailed ? "" : searchPreview;
+
+  return (
+    <button
+      ref={tileRef}
+      className="reaction-tile"
+      type="button"
+      onClick={onSelect}
+      aria-label={`Search ${PROVIDER_NAMES[provider]} for ${reaction}`}
+    >
+      <span className={`reaction-tile-art hue-${index % 6}`}>
+        {imageUrl ? (
+          <img
+            src={imageUrl}
+            alt=""
+            loading="lazy"
+            onError={() => {
+              if (categoryPreview && !categoryPreviewFailed) setCategoryPreviewFailed(true);
+              else setSearchPreviewFailed(true);
+            }}
+          />
+        ) : (
+          <span aria-hidden="true">{["✦", "☺", "♥", "✳", "☁", "✧"][index % 6]}</span>
+        )}
+        {previewQuery.isFetching && !imageUrl && <span className="reaction-preview-loader" />}
+        <span className="reaction-tile-arrow" aria-hidden="true">↗</span>
+      </span>
+      <span className="reaction-tile-name">{reaction}</span>
+    </button>
   );
 }
 

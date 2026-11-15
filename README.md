@@ -6,15 +6,24 @@ It runs entirely in the browser and can be deployed to GitHub Pages.
 ## Run locally
 
 1. Install Node.js 20 or newer.
-2. Copy `.env.example` to `.env` and add provider keys.
+2. Copy `.env.example` to `.env.local` and add provider keys.
 3. Run `npm install`, then `npm run dev`.
 4. Open <http://localhost:5173>.
+
+GitHub Actions secrets are only injected into the GitHub Pages build; they
+cannot be read back into a local `.env.local` file. Add local development
+values separately in `.env.local`. That file is ignored by Git.
 
 The app calls GIPHY, Tenor, and KLIPY directly from the browser. The **API
 console** page lets you select an operation and providers, run the requests,
 inspect raw provider JSON, and review request status, duration, result count,
 redacted endpoint URLs, and errors. TanStack Query Devtools are available in
 the app to inspect cache and query state.
+
+The reactions page uses category-provided preview GIFs where available. For
+reactions without one, it lazily searches that provider for a single preview
+when the tile scrolls into view; TanStack Query caches fetched previews during
+the session.
 
 ## Important: no hosted REST API
 

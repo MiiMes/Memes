@@ -110,6 +110,7 @@ h1, h2, h3, p { margin-top: 0; }
 .hue-5 { background: #ffe1ec; }
 .card-arrow { margin-left: auto; color: #a9a8aa; }
 .reaction-provider-list { display: grid; gap: 42px; }
+.reaction-help { margin: -8px 0 -18px; color: #858387; font-size: 11px; }
 .reaction-source-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 15px; }
 .reaction-source-heading .provider-dot { width: 10px; height: 10px; }
 .reaction-source-heading h3 { margin: 0; font: 600 18px "Space Grotesk", sans-serif; }
@@ -125,6 +126,7 @@ h1, h2, h3, p { margin-top: 0; }
 .reaction-tile:hover .reaction-tile-arrow, .reaction-tile:focus-visible .reaction-tile-arrow { opacity: 1; }
 .reaction-tile-name { display: block; overflow: hidden; padding: 8px 2px 2px; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .reaction-tile:focus-visible { outline: 2px solid var(--coral); outline-offset: 3px; border-radius: 9px; }
+.reaction-preview-loader { position: absolute; width: 20px; height: 20px; border: 2px solid #ffffff99; border-top-color: #222; border-radius: 50%; animation: spin .7s linear infinite; }
 
 footer { min-height: 95px; display: flex; align-items: center; gap: 22px; padding: 20px 7.2%; border-top: 1px solid #e6e5e3; color: #8b898c; font-size: 11px; }
 .footer-brand { color: #222; font-size: 18px; }
