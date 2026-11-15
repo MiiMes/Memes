@@ -103,6 +103,7 @@ h1, h2, h3, p { margin-top: 0; }
 .section-heading { display: flex; justify-content: space-between; align-items: end; gap: 20px; margin-bottom: 27px; }
 .dark-eyebrow { margin-bottom: 8px; color: #aaa9aa; font-size: 9px; }
 .section-heading h2 { margin: 0; font: 600 30px "Space Grotesk", sans-serif; letter-spacing: -1.3px; }
+.results-view-controls { display: flex; flex-wrap: wrap; justify-content: end; gap: 8px; }
 .results-layout-toggle { display: flex; gap: 3px; padding: 4px; border: 1px solid #e6e5e3; border-radius: 8px; background: white; }
 .results-layout-toggle button { padding: 8px 11px; border: 0; border-radius: 5px; color: #858487; background: transparent; font-size: 10px; font-weight: 600; white-space: nowrap; }
 .results-layout-toggle button.active { color: #171718; background: #f0efed; }
@@ -115,6 +116,7 @@ h1, h2, h3, p { margin-top: 0; }
 .media-switch button.active { color: #171718; background: #f0efed; }
 .provider-sections { display: grid; gap: 35px; }
 .results-pagination { display: grid; justify-items: center; gap: 9px; padding: 8px 0 20px; }
+.results-pagination-paged { display: flex; align-items: center; justify-content: center; gap: 12px; }
 .results-pagination span { color: #858387; font-size: 10px; text-align: center; }
 .provider-section-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
 .provider-section-heading .provider-dot { width: 10px; height: 10px; }
