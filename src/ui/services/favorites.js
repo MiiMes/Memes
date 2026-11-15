@@ -1,4 +1,6 @@
 const FAVORITES_STORAGE_KEY = "memes:favorites:v1";
+const GENERATED_GIFS_DB = "memes:generated-favorites";
+const GENERATED_GIFS_STORE = "gifs";
 
 function normalizeFavorite(item) {
   if (
@@ -20,6 +22,9 @@ function normalizeFavorite(item) {
     imageUrl: item.imageUrl,
     provider,
     providers: Array.isArray(item.providers) ? item.providers : [provider],
+    ...(typeof item.generatedGifId === "string" && item.generatedGifId
+      ? { generatedGifId: item.generatedGifId, mimeType: "image/gif" }
+      : {}),
     kind: "gif",
   };
 }
@@ -31,6 +36,72 @@ function favoriteKey(item) {
 function errorMessage(action, error) {
   const detail = error instanceof Error ? ` ${error.message}` : "";
   return `Favorites could not be ${action}.${detail}`;
+}
+
+function openGeneratedGifsDatabase() {
+  if (!globalThis.indexedDB) {
+    return Promise.reject(new Error("This browser does not support saving generated GIFs."));
+  }
+
+  return new Promise((resolve, reject) => {
+    const request = globalThis.indexedDB.open(GENERATED_GIFS_DB, 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(GENERATED_GIFS_STORE)) {
+        request.result.createObjectStore(GENERATED_GIFS_STORE);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("The generated GIF database could not be opened."));
+    request.onblocked = () => reject(new Error("The generated GIF database is blocked by another tab."));
+  });
+}
+
+function runGeneratedGifRequest(mode, createRequest) {
+  return openGeneratedGifsDatabase().then((database) => new Promise((resolve, reject) => {
+    let result;
+    let settled = false;
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      database.close();
+      reject(error);
+    };
+
+    let transaction;
+    try {
+      transaction = database.transaction(GENERATED_GIFS_STORE, mode);
+      const request = createRequest(transaction.objectStore(GENERATED_GIFS_STORE));
+      request.onsuccess = () => {
+        result = request.result;
+      };
+      request.onerror = () => fail(request.error ?? new Error("The generated GIF request failed."));
+      transaction.oncomplete = () => {
+        if (settled) return;
+        settled = true;
+        database.close();
+        resolve(result);
+      };
+      transaction.onerror = () => fail(transaction.error ?? new Error("The generated GIF transaction failed."));
+      transaction.onabort = () => fail(transaction.error ?? new Error("The generated GIF transaction was aborted."));
+    } catch (error) {
+      fail(error);
+    }
+  }));
+}
+
+export function saveGeneratedGif(id, blob) {
+  if (!id || blob?.type !== "image/gif") {
+    return Promise.reject(new Error("A generated GIF is required to save this favorite."));
+  }
+  return runGeneratedGifRequest("readwrite", (store) => store.put(blob, id));
+}
+
+export function readGeneratedGif(id) {
+  return runGeneratedGifRequest("readonly", (store) => store.get(id));
+}
+
+export function deleteGeneratedGif(id) {
+  return runGeneratedGifRequest("readwrite", (store) => store.delete(id));
 }
 
 export function readFavorites() {

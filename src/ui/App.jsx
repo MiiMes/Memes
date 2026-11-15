@@ -139,7 +139,13 @@ function MemeApp() {
               clearLogs={clearLogs}
             />
           ) : page === "editor" ? (
-            <MemeEditor item={editorItem} onClose={closeEditor} />
+            <MemeEditor
+              item={editorItem}
+              onClose={closeEditor}
+              isFavorite={isFavorite}
+              onToggleFavorite={toggleFavorite}
+              favoritesError={favoritesError}
+            />
           ) : page === "favorites" ? (
             <FavoritesSection
               favorites={favorites}

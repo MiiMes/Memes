@@ -2,7 +2,19 @@ import { useEffect, useState } from "react";
 import { copyAnimatedGifToClipboard } from "../services/clipboard.js";
 import { createCaptionedGif } from "../services/memeEditor.js";
 
-export function MemeEditor({ item, onClose }) {
+function createGeneratedFavoriteId() {
+  const uniqueId = globalThis.crypto?.randomUUID?.() ??
+    `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `edited-${uniqueId}`;
+}
+
+export function MemeEditor({
+  item,
+  onClose,
+  isFavorite,
+  onToggleFavorite,
+  favoritesError = "",
+}) {
   const [topText, setTopText] = useState("");
   const [bottomText, setBottomText] = useState("");
   const [fontSizePercent, setFontSizePercent] = useState(8);
@@ -13,6 +25,9 @@ export function MemeEditor({ item, onClose }) {
   const [outputUrl, setOutputUrl] = useState("");
   const [outputBlob, setOutputBlob] = useState(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [generatedFavoriteItem, setGeneratedFavoriteItem] = useState(null);
+  const [isSavingFavorite, setIsSavingFavorite] = useState(false);
+  const [favoriteActionError, setFavoriteActionError] = useState("");
 
   useEffect(() => {
     if (!outputUrl) return undefined;
@@ -23,8 +38,10 @@ export function MemeEditor({ item, onClose }) {
     setter(value);
     setOutputUrl("");
     setOutputBlob(null);
+    setGeneratedFavoriteItem(null);
     setExportError("");
     setCopyFeedback(null);
+    setFavoriteActionError("");
   }
 
   async function createMeme(event) {
@@ -34,7 +51,9 @@ export function MemeEditor({ item, onClose }) {
     setExportError("");
     setOutputUrl("");
     setOutputBlob(null);
+    setGeneratedFavoriteItem(null);
     setCopyFeedback(null);
+    setFavoriteActionError("");
     try {
       const blob = await createCaptionedGif(item.imageUrl, {
         topText,
@@ -43,6 +62,13 @@ export function MemeEditor({ item, onClose }) {
       });
       setOutputUrl(URL.createObjectURL(blob));
       setOutputBlob(blob);
+      setGeneratedFavoriteItem({
+        id: createGeneratedFavoriteId(),
+        title: `Edited ${item.title || "GIF"}`,
+        imageUrl: item.imageUrl,
+        provider: "meme-editor",
+        kind: "gif",
+      });
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       setExportError(message);
@@ -67,6 +93,21 @@ export function MemeEditor({ item, onClose }) {
       setCopyFeedback({ tone: "error", message });
     } finally {
       setIsCopying(false);
+    }
+  }
+
+  async function toggleGeneratedFavorite() {
+    if (!generatedFavoriteItem || !outputBlob || !onToggleFavorite) return;
+    setIsSavingFavorite(true);
+    setFavoriteActionError("");
+    try {
+      const saved = await onToggleFavorite(generatedFavoriteItem, outputBlob);
+      if (!saved) setFavoriteActionError("Could not update this favorite. Check the favorites error message.");
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setFavoriteActionError(message);
+    } finally {
+      setIsSavingFavorite(false);
     }
   }
 
@@ -137,8 +178,10 @@ export function MemeEditor({ item, onClose }) {
               setFontSizePercent(Number(event.target.value));
               setOutputUrl("");
               setOutputBlob(null);
+              setGeneratedFavoriteItem(null);
               setExportError("");
               setCopyFeedback(null);
+              setFavoriteActionError("");
             }}
             disabled={isExporting}
           />
@@ -217,6 +260,26 @@ export function MemeEditor({ item, onClose }) {
                 >
                   {isCopying ? "Copying GIF…" : "Click to Copy"}
                 </button>
+                {generatedFavoriteItem && onToggleFavorite && (
+                  <button
+                    className="meme-editor-secondary meme-editor-dialog-favorite"
+                    type="button"
+                    onClick={toggleGeneratedFavorite}
+                    disabled={isSavingFavorite}
+                    aria-pressed={isFavorite?.(generatedFavoriteItem) ?? false}
+                  >
+                    {isSavingFavorite
+                      ? "Saving favorite…"
+                      : isFavorite?.(generatedFavoriteItem)
+                        ? "♥ Remove from Favorites"
+                        : "♡ Add to Favorites"}
+                  </button>
+                )}
+                {(favoritesError || favoriteActionError) && (
+                  <p className="meme-editor-error" role="alert">
+                    {favoritesError || favoriteActionError}
+                  </p>
+                )}
                 {copyFeedback && (
                   <p
                     className={`meme-editor-copy-feedback ${copyFeedback.tone}`}

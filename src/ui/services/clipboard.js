@@ -6,7 +6,8 @@ const SUPPORTED_IMAGE_MIME_TYPES = new Set([
   "image/jpeg",
 ]);
 
-function imageMimeType(url) {
+function imageMimeType(url, knownMimeType) {
+  if (SUPPORTED_IMAGE_MIME_TYPES.has(knownMimeType)) return knownMimeType;
   if (typeof url !== "string" || !url) return "";
   if (/^data:/i.test(url)) {
     const commaIndex = url.indexOf(",");
@@ -154,7 +155,7 @@ export async function copyMediaToClipboard(item) {
   const mediaUrl = item.imageUrl;
   if (!mediaUrl) throw new Error("This result has no media URL to copy.");
 
-  const mimeType = imageMimeType(mediaUrl);
+  const mimeType = imageMimeType(mediaUrl, item.mimeType);
   if (!mimeType) throw new Error("This result does not have a recognizable image format.");
 
   const clipboard = globalThis.navigator?.clipboard;
