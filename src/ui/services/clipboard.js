@@ -127,6 +127,7 @@ export async function copyMediaToClipboard(item) {
   const errors = [];
   let fetchError;
   let imageBlob;
+  let imageFile;
   let staticPngBlob;
   const getImageBlob = () => {
     if (!imageBlob) {
@@ -161,6 +162,23 @@ export async function copyMediaToClipboard(item) {
       staticPngBlob = getImageBlob().then((blob) => createStaticPng(blob, logger));
     }
     return staticPngBlob;
+  };
+  const getImageFile = () => {
+    if (!imageFile) {
+      imageFile = getImageBlob().then((blob) => {
+        if (typeof globalThis.File !== "function") {
+          throw new Error("This browser cannot create File objects.");
+        }
+        const file = new globalThis.File([blob], "animation.gif", { type: "image/gif" });
+        logger.log("GIF Blob wrapped as File", {
+          name: file.name,
+          mimeType: file.type,
+          byteLength: file.size,
+        });
+        return file;
+      });
+    }
+    return imageFile;
   };
 
   const supports = (format) => {
@@ -202,6 +220,13 @@ export async function copyMediaToClipboard(item) {
 
   try {
     if (mimeType === "image/gif") {
+      const fileResult = await writeCandidate(
+        "Native GIF File clipboard write",
+        { "image/gif": getImageFile() },
+        { method: "native-file", mimeType },
+      );
+      if (fileResult) return fileResult;
+
       const formats = {
         "text/plain": new Blob([mediaUrl], { type: "text/plain" }),
       };
