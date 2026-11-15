@@ -79,26 +79,17 @@ export function MediaCard({
     }
   }
 
-  async function copyResult(imageElement) {
+  async function copyResult() {
     showCopyFeedback({ tone: "pending", message: "Copying…" });
     try {
-      const copyFormat = await copyMediaToClipboard(item, imageElement);
+      const copyFormat = await copyMediaToClipboard(item);
       const mediaName = item.kind === "sticker" ? "Sticker" : "GIF";
       const copyMessages = {
-        "multi-format": `${mediaName} copied in multiple formats; paste to verify.`,
         native: `${mediaName} bytes copied (${copyFormat.mimeType}); paste to verify.`,
-        "rich-html-custom": `${mediaName} HTML/custom data was accepted; Discord paste is unverified.`,
         "web-custom": `${mediaName} browser-specific data was accepted; Discord may ignore it.`,
-        "rich-html": "Browser accepted HTML only; this does not confirm a GIF was copied.",
-        "legacy-image": "Browser accepted copying the displayed image selection; paste to verify.",
       };
-      const browserOnlyFormat = [
-        "rich-html-custom",
-        "web-custom",
-        "rich-html",
-      ].includes(copyFormat.method);
       showCopyFeedback({
-        tone: browserOnlyFormat ? "error" : "success",
+        tone: copyFormat.method === "web-custom" ? "error" : "success",
         message: copyMessages[copyFormat.method] ?? `${mediaName} copy accepted by the browser.`,
       });
     } catch (cause) {
@@ -107,9 +98,9 @@ export function MediaCard({
     }
   }
 
-  function handleClick(event) {
+  function handleClick() {
     if (copyOnClick) {
-      void copyResult(event.currentTarget.querySelector("img"));
+      void copyResult();
     } else if (item.video) {
       playWithSound();
     } else {
