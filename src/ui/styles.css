@@ -128,14 +128,13 @@ h1, h2, h3, p { margin-top: 0; }
 .hue-4 { background: #d2f3df; }
 .hue-5 { background: #ffe1ec; }
 .card-arrow { margin-left: auto; color: #a9a8aa; }
-.reaction-provider-list { display: grid; gap: 42px; }
-.reaction-help { margin: -8px 0 -18px; color: #858387; font-size: 11px; }
-.reaction-source-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 15px; }
-.reaction-source-heading .provider-dot { width: 10px; height: 10px; }
-.reaction-source-heading h3 { margin: 0; font: 600 18px "Space Grotesk", sans-serif; }
-.reaction-source-heading > span:not(.provider-dot) { color: #919093; font-size: 10px; }
-.reaction-source-heading .reaction-preview-status { margin-left: auto; }
-.reaction-preview-error { margin-bottom: 12px; color: #8d5f30; font-size: 11px; }
+.reaction-results { display: grid; gap: 16px; }
+.reaction-help { margin: 0; color: #858387; font-size: 11px; }
+.reaction-results-heading { display: flex; align-items: baseline; gap: 12px; }
+.reaction-results-heading h3 { margin: 0; font: 600 18px "Space Grotesk", sans-serif; }
+.reaction-results-heading span { color: #919093; font-size: 10px; }
+.reaction-results-heading span:last-child { margin-left: auto; }
+.reaction-preview-error { margin: 0; color: #8d5f30; font-size: 11px; }
 .reaction-catalog { display: grid; grid-template-columns: repeat(auto-fill, minmax(145px, 1fr)); gap: 13px; }
 .reaction-tile { min-width: 0; padding: 0; border: 0; color: #222; background: transparent; text-align: left; }
 .reaction-tile-art { position: relative; display: grid; overflow: hidden; aspect-ratio: 1.55; place-items: center; border-radius: 9px; color: #39383a; font-size: 35px; transition: transform .18s ease, box-shadow .18s ease; }
@@ -144,6 +143,7 @@ h1, h2, h3, p { margin-top: 0; }
 .reaction-tile-arrow { position: absolute; right: 7px; bottom: 7px; display: grid; width: 23px; height: 23px; place-items: center; border-radius: 50%; color: white; background: #111b; font-size: 12px; opacity: 0; transition: opacity .16s ease; }
 .reaction-tile:hover .reaction-tile-arrow, .reaction-tile:focus-visible .reaction-tile-arrow { opacity: 1; }
 .reaction-tile-name { display: block; overflow: hidden; padding: 8px 2px 2px; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.reaction-tile-sources { display: block; padding: 0 2px 2px; color: #89878a; font-size: 8px; font-weight: 700; letter-spacing: .5px; }
 .reaction-tile:focus-visible { outline: 2px solid var(--coral); outline-offset: 3px; border-radius: 9px; }
 .reaction-preview-loader { position: absolute; width: 20px; height: 20px; border: 2px solid #ffffff99; border-top-color: #222; border-radius: 50%; animation: spin .7s linear infinite; }
 

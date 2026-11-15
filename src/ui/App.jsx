@@ -885,9 +885,9 @@ function MemeApp() {
                   providers={providers}
                   results={visibleCategories}
                   loading={categoriesQuery.isPending}
-                  onSelect={(term, provider) => {
+                  onSelect={(term) => {
                     setKind("gif");
-                    chooseSearch(term, provider);
+                    chooseSearch(term);
                   }}
                   locale={locale}
                   logRequest={logRequest}
@@ -1238,53 +1238,67 @@ function ReactionSections({ providers, results, loading, onSelect, locale, logRe
   if (!providers.length) {
     return <div className="empty-state">Choose at least one provider above to browse its reactions.</div>;
   }
+
+  const reactionsByTerm = new Map();
+  for (const provider of providers) {
+    for (const term of REACTIONS_BY_PROVIDER[provider] ?? []) {
+      const key = reactionKey(term);
+      const existing = reactionsByTerm.get(key);
+      if (existing) {
+        if (!existing.providers.includes(provider)) existing.providers.push(provider);
+      } else {
+        reactionsByTerm.set(key, { term, providers: [provider] });
+      }
+    }
+  }
+  const reactions = [...reactionsByTerm.values()];
+  const previewErrors = providers.flatMap((provider) =>
+    results[provider]?.error ? [{ provider, error: results[provider].error }] : [],
+  );
+
   return (
-    <div className="reaction-provider-list">
+    <div className="reaction-results">
       <p className="reaction-help">
-        Preview GIFs load as you scroll. Missing category thumbnails are fetched one at a time per reaction.
+        Preview GIFs load as you scroll. Missing category thumbnails are searched one at a time.
       </p>
-      {providers.map((provider) => {
-        const reactions = REACTIONS_BY_PROVIDER[provider] ?? [];
-        const previews = results[provider]?.items ?? [];
-        return (
-          <section className={`reaction-source ${provider}`} key={provider}>
-            <header className="reaction-source-heading">
-              <span className={`provider-dot ${provider}`} />
-              <h3>{PROVIDER_NAMES[provider]} reactions</h3>
-              <span>{reactions.length} categories</span>
-              {loading && <span className="reaction-preview-status">Loading category data…</span>}
-            </header>
-            {results[provider]?.error && (
-              <div className="reaction-preview-error">
-                Categories list is shown; preview images are unavailable: {results[provider].error}
-              </div>
-            )}
-            <div className="reaction-catalog">
-              {reactions.map((reaction, index) => {
-                const previewUrl = findReactionPreview(reaction, previews);
-                return (
-                  <ReactionTile
-                    key={`${provider}-${reaction}-${index}`}
-                    provider={provider}
-                    reaction={reaction}
-                    index={index}
-                    locale={locale}
-                    categoryPreview={previewUrl}
-                    logRequest={logRequest}
-                    onSelect={() => onSelect(reaction, provider)}
-                  />
-                );
-              })}
-            </div>
-          </section>
-        );
-      })}
+      <header className="reaction-results-heading">
+        <h3>All reactions</h3>
+        <span>{reactions.length} unique terms</span>
+        {loading && <span>Loading category previews…</span>}
+      </header>
+      {previewErrors.map(({ provider, error }) => (
+        <div className="reaction-preview-error" key={provider} role="status">
+          {PROVIDER_NAMES[provider]} category previews unavailable: {error}
+        </div>
+      ))}
+      <div className="reaction-catalog">
+        {reactions.map(({ term, providers: sources }, index) => {
+          const categoryPreview = sources
+            .map((provider) => findReactionPreview(term, results[provider]?.items ?? []))
+            .find(Boolean) ?? "";
+          const previewProvider = sources.find(providerIsConfigured) ?? sources[0];
+          return (
+            <ReactionTile
+              key={reactionKey(term)}
+              providers={sources}
+              previewProvider={previewProvider}
+              reaction={term}
+              index={index}
+              locale={locale}
+              categoryPreview={categoryPreview}
+              logRequest={logRequest}
+              onSelect={() => onSelect(term)}
+            />
+          );
+        })}
+      </div>
     </div>
   );
 }
 
 function ReactionTile({
-  provider,
+  providers,
+  previewProvider,
   reaction,
   index,
   locale,
@@ -1319,14 +1333,17 @@ function ReactionTile({
   }, []);
 
   const previewQuery = useQuery({
-    queryKey: ["reaction-preview", provider, reaction, locale],
+    queryKey: ["reaction-preview", previewProvider, reaction, locale],
     queryFn: () => requestProvider(
-      provider,
+      previewProvider,
       "search",
       { q: reaction, kind: "gif", locale, limit: 1 },
       logRequest,
     ),
-    enabled: isVisible && providerIsConfigured(provider) && (!categoryPreview || categoryPreviewFailed),
+    enabled:
+      isVisible &&
+      providerIsConfigured(previewProvider) &&
+      (!categoryPreview || categoryPreviewFailed),
     staleTime: 24 * 60 * 60 * 1000,
     gcTime: 24 * 60 * 60 * 1000,
   });
@@ -1341,7 +1358,7 @@ function ReactionTile({
       className="reaction-tile"
       type="button"
       onClick={onSelect}
-      aria-label={`Search ${PROVIDER_NAMES[provider]} for ${reaction}`}
+      aria-label={`Search for ${reaction} on ${providers.map((provider) => PROVIDER_NAMES[provider]).join(" and ")}`}
     >
       <span className={`reaction-tile-art hue-${index % 6}`}>
         {imageUrl ? (
@@ -1361,6 +1378,9 @@ function ReactionTile({
         <span className="reaction-tile-arrow" aria-hidden="true">↗</span>
       </span>
       <span className="reaction-tile-name">{reaction}</span>
+      <span className="reaction-tile-sources">
+        {providers.map((provider) => PROVIDER_NAMES[provider]).join(" + ")}
+      </span>
     </button>
   );
 }
