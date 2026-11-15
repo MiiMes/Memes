@@ -209,6 +209,22 @@ export function MemeEditor({ item, onClose }) {
                 <p className="meme-editor-dialog-note">
                   Right-click the GIF to copy it, then paste it where you want.
                 </p>
+                <button
+                  className="meme-editor-primary meme-editor-dialog-copy"
+                  type="button"
+                  onClick={copyMeme}
+                  disabled={isCopying}
+                >
+                  {isCopying ? "Copying GIF…" : "Click to Copy"}
+                </button>
+                {copyFeedback && (
+                  <p
+                    className={`meme-editor-copy-feedback ${copyFeedback.tone}`}
+                    role={copyFeedback.tone === "error" ? "alert" : "status"}
+                  >
+                    {copyFeedback.message}
+                  </p>
+                )}
               </>
             )}
           </section>
