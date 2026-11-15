@@ -41,13 +41,15 @@ the session.
 
 The browser-only meme editor accepts provider GIFs, uploaded images, and local
 MP4, WebM, Ogg, or QuickTime video files up to 20 MB. Video decoding and
-frame-by-frame GIF or video-only WebM generation stay on-device; trim video to
-a maximum 10-second export. WebM requires canvas capture and `MediaRecorder`,
-contains no audio, and does not support reverse playback. Browser codec support
-varies by format. Animated GIFs can be trimmed,
+frame-by-frame GIF or video-only WebM/MP4 generation stay on-device; trim video
+to a maximum 10-second export. WebM and MP4 require canvas capture and
+`MediaRecorder`, contain no audio, and do not support reverse playback. MP4 is
+offered only when the browser reports a compatible encoder. Browser codec
+support varies by format. Animated GIFs can be trimmed,
 sped up, reversed, and exported with timed text layers. Text positions can be
-keyframed, and optional face detection can suggest positions across sampled
-video frames. Canvas presets support square, landscape, portrait, and story
+keyframed, including emoji sticker layers; optional face detection can suggest
+positions across sampled video frames. This is not arbitrary-object tracking.
+Canvas presets support square, landscape, portrait, and story
 aspect ratios. **Export platform pack** creates a ZIP containing square,
 landscape, and story renders plus an editable `.meme` project. Portable project
 files bundle the source media and editor settings. Canvas text layers support
@@ -73,21 +75,56 @@ to and merged from a JSON backup; generated GIF bytes are included, so backups
 can be large (50 MB maximum). Local drafts and their source files are not part
 of that backup.
 
-**Copy edit link** shares the HTTPS source URL and bounded editor settings in
-the URL fragment; no edit state is stored on a server. Anyone with the link can
-see its media URL and caption text. Local uploads cannot be embedded in a link;
-export a portable `.meme` project to share those edits. Source hosts may block
-browser-side access, and their media must be reachable for a recipient to load
-the edit.
+**Copy edit link** compresses the HTTPS source URL and bounded editor settings
+with LZ-String in the URL fragment; existing uncompressed links continue to
+open. No edit state is stored on a server. Anyone with the link can see its
+media URL and caption text. Links are limited to 12 KB and do not embed local
+uploads or image thumbnails; export a portable `.meme` project for those edits.
+Source hosts may block browser-side access, and their media must be reachable
+for a recipient to load the edit.
 
 The editor supports drag-and-drop and paste for local media. On browsers that
 provide the File System Access API, **Save to folder** opens a native save
-picker; the usual download remains available as a fallback. Generated GIFs
-and PNG images can be copied with the Clipboard API where supported. Favorites
-search includes titles, captions, providers, and tags; saved drafts are
-searchable too. Where supported, **Search by meaning** expands a mood query
-with the browser's on-device language model and searches only local library
-metadata.
+picker; the usual download remains available as a fallback. Generated GIFs and PNG images can be copied with the Clipboard API where
+supported.
+Favorites search includes titles, captions, providers, and tags;
+saved drafts are searchable too. **Search by meaning** uses a quantized
+all-MiniLM model in the browser to rank local favorites and drafts. The model
+is downloaded from Hugging Face on first use and cached by the browser; media,
+queries, and library metadata are not sent for inference. **Remove background**
+uses the quantized MODNet portrait-matting model to create a transparent PNG
+from a still image. Its model is also downloaded on first use. Both features
+are optional; model loading and inference require a compatible browser and
+available memory. MODNet is portrait matting, not a general-purpose object
+selection tool. The models are Apache-2.0 licensed.
+Background removal currently loads the transparent cutout as the editor's
+source image; it does not yet place a separate image-sticker layer over another
+background.
+
+**Collaborate live** uses WebRTC data channels and manual copy/paste of the
+connection offer and answer, with no signaling server. Both participants must
+open the same source media; only editor settings (captions, drawing, timing,
+and transforms) are synchronized, not the media itself. Direct connectivity
+depends on the networks involved. A STUN server can be entered to improve
+connectivity across networks; it can see network addresses in the handshake,
+but does not receive media or editor settings. Simultaneous edits use
+last-update-wins synchronization rather than conflict-free merging.
+
+The optional `<miimes-search>` web component can be embedded with a single
+module script:
+
+```html
+<script type="module" src="https://miimes.github.io/Memes/miimes-search.js"></script>
+<miimes-search providers="giphy,tenor" app-url="https://miimes.github.io/Memes/"></miimes-search>
+```
+
+The component searches the selected providers and opens the editor in a
+dialog. `providers`, `locale`, and `app-url` are optional attributes. The
+standalone bundle is emitted into `dist/miimes-search.js` by `npm run build`.
+The host page needs no keys or server; provider keys are the public,
+build-time keys in the MiiMes bundle, so this is not a keyless provider API.
+These keys are visible to visitors and must be restricted in each provider
+dashboard.
 Reaction Deck presents filtered favorites in a fullscreen view with
 arrow-key/Space navigation and clipboard actions. The home search can show
 results grouped by provider or in one combined view.

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { MediaCard } from "./MediaComponents.jsx";
 import { copyMediaToClipboard } from "../services/clipboard.js";
 import { readMemeDrafts } from "../services/favorites.js";
+import { rankLocalLibrary } from "../services/onDeviceAi.js";
 
 export function FavoritesSection({
   favorites,
@@ -22,8 +23,9 @@ export function FavoritesSection({
   const [collectionFilter, setCollectionFilter] = useState("");
   const [tagFilter, setTagFilter] = useState("");
   const [libraryQuery, setLibraryQuery] = useState("");
-  const [expandedSearchTerms, setExpandedSearchTerms] = useState([]);
-  const [isExpandingSearch, setIsExpandingSearch] = useState(false);
+  const [semanticResults, setSemanticResults] = useState([]);
+  const [semanticSearchQuery, setSemanticSearchQuery] = useState("");
+  const [isSearchingByMeaning, setIsSearchingByMeaning] = useState(false);
   const [searchFeedback, setSearchFeedback] = useState("");
   const [isDeckOpen, setIsDeckOpen] = useState(false);
   const [deckIndex, setDeckIndex] = useState(0);
@@ -34,17 +36,18 @@ export function FavoritesSection({
   const [isBackingUp, setIsBackingUp] = useState(false);
   const deckRef = useRef(null);
   const backupInputRef = useRef(null);
+  const searchSequenceRef = useRef(0);
   const normalizedTagFilter = tagFilter.trim().toLocaleLowerCase();
   const normalizedLibraryQuery = libraryQuery.trim().toLocaleLowerCase();
-  const expandedTerms = expandedSearchTerms.map((term) => term.toLocaleLowerCase());
+  const semanticOrder = new Map(semanticResults.map((entry, index) => [entry.key, index]));
   const visibleDrafts = drafts.filter((draft) => {
     const searchableText = [
       draft.title,
       ...(draft.textLayers ?? []).map((layer) => layer.text),
     ].join(" ").toLocaleLowerCase();
-    return !normalizedLibraryQuery ||
-      searchableText.includes(normalizedLibraryQuery) ||
-      expandedTerms.some((term) => searchableText.includes(term));
+    return semanticSearchQuery
+      ? semanticOrder.has(`draft:${draft.id}`)
+      : !normalizedLibraryQuery || searchableText.includes(normalizedLibraryQuery);
   });
   const visibleFavorites = favorites.filter((item) => {
     const matchesCollection = collectionFilter === ""
@@ -60,11 +63,19 @@ export function FavoritesSection({
       item.captionText,
       ...(item.tags ?? []),
     ].join(" ").toLocaleLowerCase();
-    return matchesCollection && matchesTag &&
-      (!normalizedLibraryQuery ||
-        searchableText.includes(normalizedLibraryQuery) ||
-        expandedTerms.some((term) => searchableText.includes(term)));
-  });
+    const matchesQuery = semanticSearchQuery
+      ? semanticOrder.has(`favorite:${item.provider}:${item.id}`)
+      : !normalizedLibraryQuery || searchableText.includes(normalizedLibraryQuery);
+    return matchesCollection && matchesTag && matchesQuery;
+  }).sort((left, right) => semanticSearchQuery
+    ? semanticOrder.get(`favorite:${left.provider}:${left.id}`) -
+      semanticOrder.get(`favorite:${right.provider}:${right.id}`)
+    : 0);
+  const orderedDrafts = semanticSearchQuery
+    ? [...visibleDrafts].sort((left, right) =>
+        semanticOrder.get(`draft:${left.id}`) - semanticOrder.get(`draft:${right.id}`),
+      )
+    : visibleDrafts;
   const currentDeckItem = visibleFavorites[deckIndex];
 
   useEffect(() => {
@@ -149,44 +160,52 @@ export function FavoritesSection({
     }
   }
 
-  async function expandLibrarySearch() {
-    const languageModel = globalThis.LanguageModel ?? globalThis.ai?.languageModel;
+  async function searchLibraryByMeaning() {
     if (!libraryQuery.trim()) {
-      setSearchFeedback("Enter a mood or phrase to expand.");
+      setSearchFeedback("Enter a mood or phrase to search.");
       return;
     }
-    if (typeof languageModel?.create !== "function") {
-      setSearchFeedback("On-device AI search is not available in this browser. Exact title, caption, provider, and tag search still works.");
-      return;
-    }
-    setIsExpandingSearch(true);
-    setSearchFeedback("Finding related local search terms on this device…");
-    let session;
+    const requestId = ++searchSequenceRef.current;
+    setSemanticSearchQuery(libraryQuery.trim());
+    setIsSearchingByMeaning(true);
+    setSearchFeedback("Loading the quantized on-device model. First use downloads it from Hugging Face and caches it in this browser…");
     try {
-      const options = {
-        expectedInputs: [{ type: "text", languages: ["en"] }],
-        expectedOutputs: [{ type: "text", languages: ["en"] }],
-      };
-      const availability = await languageModel.availability?.(options);
-      if (availability === "unavailable") throw new Error("The on-device language model is unavailable.");
-      session = await languageModel.create(options);
-      const response = await session.prompt(
-        `Suggest up to eight concise related words or short phrases for searching a personal meme library by mood or meaning. Search phrase: "${libraryQuery.trim()}". Return only comma-separated terms.`,
-      );
-      const terms = [...new Set(String(response)
-        .split(/[,\n]+/)
-        .map((term) => term.replace(/^\s*(?:[-*]|\d+[.)])\s*/, "").trim())
-        .filter((term) => term && term.toLocaleLowerCase() !== libraryQuery.trim().toLocaleLowerCase()))]
-        .slice(0, 8);
-      if (!terms.length) throw new Error("The model returned no related search terms.");
-      setExpandedSearchTerms(terms);
-      setSearchFeedback(`Expanded locally with: ${terms.join(", ")}`);
+      const entries = [
+        ...favorites.map((item) => ({
+          key: `favorite:${item.provider}:${item.id}`,
+          title: item.title,
+          provider: item.provider,
+          captionText: item.captionText,
+          tags: item.tags,
+        })),
+        ...drafts.map((draft) => ({
+          key: `draft:${draft.id}`,
+          title: draft.title,
+          textLayers: draft.textLayers,
+        })),
+      ];
+      const result = await rankLocalLibrary(libraryQuery, entries, (progress) => {
+        if (requestId !== searchSequenceRef.current) return;
+        if (progress.status === "indexing") {
+          setSearchFeedback(`Comparing local library items on this device… ${progress.completed} of ${progress.total}`);
+        } else if (progress.status === "progress") {
+          const percent = Number.isFinite(progress.progress)
+            ? ` ${Math.round(progress.progress)}%`
+            : "";
+          setSearchFeedback(`Preparing the local model…${percent}`);
+        }
+      });
+      if (requestId !== searchSequenceRef.current) return;
+      setSemanticResults(result.matches);
+      setSearchFeedback(result.matches.length
+        ? `Found ${result.matches.length} semantically related local item(s)${result.omittedCount ? `; ${result.omittedCount} older items were omitted` : ""}.`
+        : "No local items matched that meaning. Try another phrase.");
     } catch (cause) {
-      setExpandedSearchTerms([]);
-      setSearchFeedback(`Search expansion failed. ${cause instanceof Error ? cause.message : String(cause)}`);
+      if (requestId !== searchSequenceRef.current) return;
+      setSemanticResults([]);
+      setSearchFeedback(`On-device semantic search failed. ${cause instanceof Error ? cause.message : String(cause)}`);
     } finally {
-      session?.destroy?.();
-      setIsExpandingSearch(false);
+      if (requestId === searchSequenceRef.current) setIsSearchingByMeaning(false);
     }
   }
 
@@ -285,7 +304,10 @@ export function FavoritesSection({
               maxLength={100}
               onChange={(event) => {
                 setLibraryQuery(event.target.value);
-                setExpandedSearchTerms([]);
+                searchSequenceRef.current += 1;
+                setIsSearchingByMeaning(false);
+                setSemanticResults([]);
+                setSemanticSearchQuery("");
                 setSearchFeedback("");
               }}
               placeholder="Titles, captions, providers, tags"
@@ -294,10 +316,10 @@ export function FavoritesSection({
           <button
             className="meme-editor-secondary"
             type="button"
-            onClick={expandLibrarySearch}
-            disabled={isExpandingSearch}
+            onClick={searchLibraryByMeaning}
+            disabled={isSearchingByMeaning}
           >
-            {isExpandingSearch ? "Expanding…" : "Search by meaning"}
+            {isSearchingByMeaning ? "Searching locally…" : "Search by meaning"}
           </button>
           <label>
             <span>Collection</span>
@@ -320,7 +342,11 @@ export function FavoritesSection({
           <span>{visibleFavorites.length} shown</span>
         </div>
       )}
-      {searchFeedback && <p className="meme-editor-copy-feedback" role="status">{searchFeedback}</p>}
+      {searchFeedback && (
+        <p className="meme-editor-copy-feedback" role="status">
+          {searchFeedback} Media and search queries stay in this browser; the model is downloaded from Hugging Face on first use.
+        </p>
+      )}
       {favorites.length ? (
         visibleFavorites.length ? (
           <div className="mosaic-grid">
@@ -385,7 +411,7 @@ export function FavoritesSection({
             </div>
             <span>{visibleDrafts.length} shown</span>
           </header>
-          {visibleDrafts.length ? visibleDrafts.map((draft) => (
+          {orderedDrafts.length ? orderedDrafts.map((draft) => (
             <article key={draft.id}>
               <div>
                 <strong>{draft.title}</strong>

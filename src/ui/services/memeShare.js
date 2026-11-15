@@ -1,4 +1,5 @@
 import { MEME_FONT_FAMILIES } from "../constants/memeFonts.js";
+import LZString from "lz-string";
 
 const MAX_SHARE_LENGTH = 12_000;
 const MAX_TEXT_LAYERS = 40;
@@ -67,7 +68,7 @@ function normalizeTextLayer(layer) {
   };
 }
 
-function normalizeSettings(settings) {
+export function normalizeMemeSettings(settings) {
   if (
     !settings ||
     !Array.isArray(settings.textLayers) ||
@@ -119,7 +120,9 @@ function normalizeSettings(settings) {
       ? Number(settings.gifColorCount)
       : 256,
     gifDithering: Boolean(settings.gifDithering),
-    videoOutputFormat: settings.videoOutputFormat === "webm" ? "webm" : "gif",
+    videoOutputFormat: ["webm", "mp4"].includes(settings.videoOutputFormat)
+      ? settings.videoOutputFormat
+      : "gif",
   };
 }
 
@@ -138,9 +141,9 @@ export function createMemeShareUrl({ sourceUrl, title, provider, settings }, cur
     sourceUrl: source.href,
     title: typeof title === "string" ? title.slice(0, 100) : "Shared meme",
     provider: typeof provider === "string" ? provider.slice(0, 40) : "shared-link",
-    settings: normalizeSettings(settings),
+    settings: normalizeMemeSettings(settings),
   };
-  const token = encodeBase64Url(JSON.stringify(payload));
+  const token = `lz1.${LZString.compressToEncodedURIComponent(JSON.stringify(payload))}`;
   const shareUrl = new URL(currentUrl);
   shareUrl.hash = `#/editor?share=${token}`;
   if (shareUrl.href.length > MAX_SHARE_LENGTH) {
@@ -155,7 +158,13 @@ export function readMemeShareFromHash(hash = globalThis.location?.hash ?? "") {
   if (!token) return { item: null, settings: null, error: "" };
   try {
     if (token.length > MAX_SHARE_LENGTH) throw new Error("This share link is too large.");
-    const payload = JSON.parse(decodeBase64Url(token));
+    const serialized = token.startsWith("lz1.")
+      ? LZString.decompressFromEncodedURIComponent(token.slice(4))
+      : decodeBase64Url(token);
+    if (typeof serialized !== "string") {
+      throw new Error("This share link could not be decompressed.");
+    }
+    const payload = JSON.parse(serialized);
     if (payload?.version !== 1 || typeof payload.sourceUrl !== "string") {
       throw new Error("This share link is not a supported meme edit.");
     }
@@ -171,7 +180,7 @@ export function readMemeShareFromHash(hash = globalThis.location?.hash ?? "") {
         provider: typeof payload.provider === "string" ? payload.provider.slice(0, 40) : "shared-link",
         kind: "gif",
       },
-      settings: normalizeSettings(payload.settings),
+      settings: normalizeMemeSettings(payload.settings),
       error: "",
     };
   } catch (cause) {

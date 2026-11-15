@@ -3,15 +3,18 @@ import { copyAnimatedGifToClipboard, copyPngToClipboard } from "../services/clip
 import { createExportPack } from "../services/exportPack.js";
 import { deleteMemeDraft, readMemeDrafts, saveMemeDraft } from "../services/favorites.js";
 import { MEME_FONTS } from "../constants/memeFonts.js";
+import { MemeCollaboration } from "./MemeCollaboration.jsx";
 import {
   createCaptionedMedia,
   drawMemeOverlays,
   getVideoOutputDimensions,
   inspectMedia,
+  supportsMP4Export,
   supportsWebMExport,
 } from "../services/memeEditor.js";
 import { createMemeProject, readMemeProject } from "../services/memeProject.js";
 import { createMemeShareUrl } from "../services/memeShare.js";
+import { removeImageBackground } from "../services/onDeviceAi.js";
 
 const EXPORT_PRESETS = {
   original: null,
@@ -32,6 +35,13 @@ function getMediaDimensions(media) {
     width: media?.videoWidth || media?.naturalWidth || 0,
     height: media?.videoHeight || media?.naturalHeight || 0,
   };
+}
+
+function getOutputExtension(blob) {
+  if (blob?.type === "image/gif") return "gif";
+  if (blob?.type === "video/mp4") return "mp4";
+  if (blob?.type.startsWith("video/")) return "webm";
+  return "png";
 }
 
 function seekVideoElement(video, timeSeconds) {
@@ -131,6 +141,8 @@ export function MemeEditor({
   const [copilotFeedback, setCopilotFeedback] = useState("");
   const [faceFeedback, setFaceFeedback] = useState("");
   const [isDetectingFaces, setIsDetectingFaces] = useState(false);
+  const [isRemovingBackground, setIsRemovingBackground] = useState(false);
+  const [backgroundFeedback, setBackgroundFeedback] = useState("");
   const previewRef = useRef(null);
   const previewImageRef = useRef(null);
   const captionCanvasRef = useRef(null);
@@ -145,7 +157,7 @@ export function MemeEditor({
     ? Math.max(20, timeline.endMs - timeline.startMs)
     : 0;
   const selectedExportLabel = mediaInfo?.isVideo
-    ? videoOutputFormat === "webm" ? "WebM" : "GIF"
+    ? videoOutputFormat === "gif" ? "GIF" : videoOutputFormat.toUpperCase()
     : "image";
   const formatTime = (milliseconds) => `${(milliseconds / 1000).toFixed(1)}s`;
 
@@ -383,6 +395,46 @@ export function MemeEditor({
     setCopyFeedback(null);
     setFavoriteActionError("");
     setOutputActionFeedback("");
+  }
+
+  function applyCollaboratorSettings(settings) {
+    setTextLayers(settings.textLayers);
+    setSelectedTextId(settings.textLayers[0]?.id ?? "top");
+    setStrokes(settings.strokes);
+    setFontSizePercent(settings.fontSizePercent);
+    setTransform(settings.transform);
+    setTimeline(settings.timeline);
+    setOutputPreset(settings.outputPreset);
+    setGifColorCount(settings.gifColorCount);
+    setGifDithering(settings.gifDithering);
+    setVideoOutputFormat(settings.videoOutputFormat);
+    invalidateOutput();
+  }
+
+  async function removeBackground() {
+    if (!mediaInfo || mediaInfo.isVideo || mediaInfo.isGif) {
+      setBackgroundFeedback("Background removal currently supports still images only.");
+      return;
+    }
+    setIsRemovingBackground(true);
+    setBackgroundFeedback("Loading the quantized on-device model; first use downloads it from Hugging Face…");
+    try {
+      const sourceBlob = await getSourceBlob();
+      const cutout = await removeImageBackground(sourceBlob, (progress) => {
+        if (progress.status === "progress" && Number.isFinite(progress.progress)) {
+          setBackgroundFeedback(`Preparing the local model… ${Math.round(progress.progress)}%`);
+        }
+      });
+      if (cutout.size > 20 * 1024 * 1024) {
+        throw new Error("The generated transparent PNG is too large to load into the editor.");
+      }
+      useUploadedFile(new File([cutout], "background-removed.png", { type: "image/png" }));
+      setBackgroundFeedback("Transparent PNG cutout created locally and loaded into the editor.");
+    } catch (cause) {
+      setBackgroundFeedback(`Background removal failed. ${cause instanceof Error ? cause.message : String(cause)}`);
+    } finally {
+      setIsRemovingBackground(false);
+    }
   }
 
   function updateTextLayer(id, updates) {
@@ -648,7 +700,9 @@ export function MemeEditor({
         ? Number(settings.gifColorCount)
         : 256);
       setGifDithering(Boolean(settings.gifDithering));
-      setVideoOutputFormat(settings.videoOutputFormat === "webm" ? "webm" : "gif");
+      setVideoOutputFormat(["webm", "mp4"].includes(settings.videoOutputFormat)
+        ? settings.videoOutputFormat
+        : "gif");
       invalidateOutput();
       setShareLink("");
       setShareLinkFeedback("");
@@ -887,7 +941,9 @@ export function MemeEditor({
     setOutputPreset(draft.outputPreset ?? "original");
     setGifColorCount(draft.gifColorCount);
     setGifDithering(draft.gifDithering);
-    setVideoOutputFormat(draft.videoOutputFormat === "webm" ? "webm" : "gif");
+    setVideoOutputFormat(["webm", "mp4"].includes(draft.videoOutputFormat)
+      ? draft.videoOutputFormat
+      : "gif");
     setOutputUrl("");
     setOutputBlob(null);
     setVariantItems([]);
@@ -985,11 +1041,7 @@ export function MemeEditor({
           outputWidth: width,
           outputHeight: height,
         });
-        const extension = blob.type === "image/gif"
-          ? "gif"
-          : blob.type === "video/webm"
-            ? "webm"
-            : "png";
+        const extension = getOutputExtension(blob);
         const filename = `meme-${name}.${extension}`;
         entries.push({ name: filename, blob });
         outputDetails.push({ filename, width, height, type: blob.type, bytes: blob.size });
@@ -1050,11 +1102,7 @@ export function MemeEditor({
 
   function downloadMeme() {
     if (!outputBlob) return;
-    const extension = outputBlob.type === "image/gif"
-      ? "gif"
-      : outputBlob.type === "video/webm"
-        ? "webm"
-        : "png";
+    const extension = getOutputExtension(outputBlob);
     const url = URL.createObjectURL(outputBlob);
     const link = document.createElement("a");
     link.href = url;
@@ -1066,11 +1114,7 @@ export function MemeEditor({
 
   async function saveMemeToFolder() {
     if (!outputBlob || typeof globalThis.showSaveFilePicker !== "function") return;
-    const extension = outputBlob.type === "image/gif"
-      ? "gif"
-      : outputBlob.type === "video/webm"
-        ? "webm"
-        : "png";
+    const extension = getOutputExtension(outputBlob);
     let writable;
     try {
       const handle = await globalThis.showSaveFilePicker({
@@ -1104,11 +1148,7 @@ export function MemeEditor({
 
   async function shareMeme() {
     if (!outputBlob) return;
-    const extension = outputBlob.type === "image/gif"
-      ? "gif"
-      : outputBlob.type === "video/webm"
-        ? "webm"
-        : "png";
+    const extension = getOutputExtension(outputBlob);
     const file = new File([outputBlob], `meme.${extension}`, { type: outputBlob.type });
     const shareData = { files: [file], title: "My meme" };
     if (typeof navigator.share !== "function" ||
@@ -1284,11 +1324,11 @@ export function MemeEditor({
           tabIndex={0}
           aria-label="Meme preview. Drag text to reposition it, or drop and paste media here."
         >
-          {outputBlob?.type === "video/webm" && outputUrl ? (
+          {outputBlob?.type.startsWith("video/") && outputUrl ? (
             <video
               className="meme-editor-generated-video"
               src={outputUrl}
-              aria-label="Generated WebM preview"
+              aria-label={`Generated ${getOutputExtension(outputBlob).toUpperCase()} preview`}
               autoPlay
               loop
               muted
@@ -1374,6 +1414,20 @@ export function MemeEditor({
             }}
           />
         </label>
+        <button
+          className="meme-editor-secondary"
+          type="button"
+          onClick={removeBackground}
+          disabled={!mediaInfo || mediaInfo.isGif || mediaInfo.isVideo || isRemovingBackground}
+        >
+          {isRemovingBackground ? "Removing background…" : "Remove background"}
+        </button>
+        <p className="meme-editor-preview-note">
+          Still images only. The quantized portrait-matting model downloads on first use; inference stays in this browser.
+        </p>
+        {backgroundFeedback && (
+          <p className="meme-editor-copy-feedback" role="status">{backgroundFeedback}</p>
+        )}
         <div className="meme-editor-project-tools">
           <button
             className="meme-editor-secondary"
@@ -1422,6 +1476,20 @@ export function MemeEditor({
             />
           </label>
         )}
+        <MemeCollaboration
+          settings={{
+            textLayers,
+            strokes,
+            fontSizePercent,
+            transform,
+            timeline,
+            outputPreset,
+            gifColorCount,
+            gifDithering,
+            videoOutputFormat,
+          }}
+          onReceiveSettings={applyCollaboratorSettings}
+        />
         {mediaInfoError && <p className="meme-editor-error" role="status">{mediaInfoError}</p>}
         {(mediaInfo?.isGif || mediaInfo?.isVideo) && (
           <div className="meme-editor-timeline">
@@ -1976,11 +2044,17 @@ export function MemeEditor({
                   <option value="webm" disabled={!supportsWebMExport()}>
                     WebM video{supportsWebMExport() ? "" : " · not supported"}
                   </option>
+                  <option value="mp4" disabled={!supportsMP4Export()}>
+                    MP4 video{supportsMP4Export() ? "" : " · not supported"}
+                  </option>
                 </select>
               </label>
               <small>
-                WebM is recorded on-device, has no audio, and does not support reverse playback.
-                {!supportsWebMExport() ? " This browser does not support canvas video recording." : ""}
+                Video is recorded on-device without audio; MP4 and WebM depend on browser codecs.
+                Neither video format supports reverse playback.
+                {!supportsWebMExport() && !supportsMP4Export()
+                  ? " This browser does not support canvas video recording."
+                  : ""}
               </small>
             </>
           )}
@@ -2066,7 +2140,7 @@ export function MemeEditor({
           <button className="meme-editor-primary" type="submit" disabled={isExporting || isExportingPack}>
             {isExporting
               ? `Creating ${selectedExportLabel}…`
-              : `Create ${selectedExportLabel === "WebM" ? "WebM" : "meme"}`}
+              : `Create ${selectedExportLabel === "image" ? "meme" : selectedExportLabel}`}
           </button>
           <button
             className="meme-editor-secondary"
@@ -2095,7 +2169,7 @@ export function MemeEditor({
           <>
             <div className="meme-editor-output-actions">
               <button className="meme-editor-secondary" type="button" onClick={downloadMeme}>
-                Download {outputBlob.type === "image/gif" ? "GIF" : outputBlob.type === "video/webm" ? "WebM" : "PNG"}
+                Download {getOutputExtension(outputBlob).toUpperCase()}
               </button>
               {typeof globalThis.showSaveFilePicker === "function" && (
                 <button className="meme-editor-secondary" type="button" onClick={saveMemeToFolder}>
@@ -2111,8 +2185,8 @@ export function MemeEditor({
               {" · "}{(outputBlob.size / 1024).toFixed(1)} KB · {
                 outputBlob.type === "image/gif"
                   ? "Animated GIF"
-                  : outputBlob.type === "video/webm"
-                    ? "WebM video"
+                  : outputBlob.type.startsWith("video/")
+                    ? `${getOutputExtension(outputBlob).toUpperCase()} video`
                     : "PNG image"
               }
             </p>
@@ -2163,7 +2237,7 @@ export function MemeEditor({
               </div>
             ) : outputUrl && (
               <>
-                {outputBlob?.type === "video/webm" ? (
+                {outputBlob?.type.startsWith("video/") ? (
                   <video
                     className="meme-editor-dialog-image"
                     src={outputUrl}
@@ -2172,7 +2246,7 @@ export function MemeEditor({
                     muted
                     playsInline
                     controls
-                    aria-label={item?.title || "Your edited WebM video"}
+                    aria-label={item?.title || `Your edited ${getOutputExtension(outputBlob).toUpperCase()} video`}
                   />
                 ) : (
                   <img
@@ -2184,8 +2258,8 @@ export function MemeEditor({
                 <p className="meme-editor-dialog-note">
                   {outputBlob?.type === "image/gif"
                     ? "Right-click the GIF to copy it, or use the buttons to download or share."
-                    : outputBlob?.type === "video/webm"
-                      ? "WebM is video-only with no audio. Download or share the edited clip."
+                    : outputBlob?.type.startsWith("video/")
+                      ? `${getOutputExtension(outputBlob).toUpperCase()} video has no audio. Download or share the edited clip.`
                       : "Copy, download, or share your edited image."}
                 </p>
                 {["image/gif", "image/png"].includes(outputBlob?.type) && (
@@ -2204,7 +2278,7 @@ export function MemeEditor({
                 )}
                 <div className="meme-editor-dialog-actions">
                   <button className="meme-editor-secondary" type="button" onClick={downloadMeme}>
-                    Download {outputBlob?.type === "image/gif" ? "GIF" : outputBlob?.type === "video/webm" ? "WebM" : "PNG"}
+                    Download {getOutputExtension(outputBlob).toUpperCase()}
                   </button>
                   <button className="meme-editor-secondary" type="button" onClick={shareMeme}>
                     Share meme

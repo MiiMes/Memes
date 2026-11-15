@@ -107,11 +107,28 @@ function webmMimeType() {
   ) ?? "";
 }
 
+function mp4MimeType() {
+  const recorder = globalThis.MediaRecorder;
+  const candidates = ["video/mp4;codecs=avc1.42E01E", "video/mp4"];
+  if (typeof recorder?.isTypeSupported !== "function") return "";
+  return candidates.find((mimeType) =>
+    recorder.isTypeSupported(mimeType),
+  ) ?? "";
+}
+
 export function supportsWebMExport() {
   return Boolean(
     typeof globalThis.MediaRecorder === "function" &&
     typeof globalThis.HTMLCanvasElement?.prototype?.captureStream === "function" &&
     webmMimeType(),
+  );
+}
+
+export function supportsMP4Export() {
+  return Boolean(
+    typeof globalThis.MediaRecorder === "function" &&
+    typeof globalThis.HTMLCanvasElement?.prototype?.captureStream === "function" &&
+    mp4MimeType(),
   );
 }
 
@@ -388,12 +405,15 @@ async function encodeVideo(sourceBlob, captions) {
       throw new Error("This video frame is too large to edit in the browser.");
     }
 
-    async function encodeVideoAsWebM(video, captions) {
-      if (!supportsWebMExport()) {
-        throw new Error("WebM export requires browser support for canvas capture and MediaRecorder.");
+    async function encodeVideoWithRecorder(video, captions, format) {
+      const supported = format === "mp4" ? supportsMP4Export() : supportsWebMExport();
+      const mimeType = format === "mp4" ? mp4MimeType() : webmMimeType();
+      const formatLabel = format.toUpperCase();
+      if (!supported) {
+        throw new Error(`${formatLabel} export requires browser support for canvas capture and MediaRecorder.`);
       }
       if (captions.reverse) {
-        throw new Error("WebM export does not support reverse playback. Turn off Reverse playback or export as GIF.");
+        throw new Error(`${formatLabel} export does not support reverse playback. Turn off Reverse playback or export as GIF.`);
       }
 
       let stream;
@@ -415,7 +435,7 @@ async function encodeVideo(sourceBlob, captions) {
           throw new Error("Choose a video timeline range that includes a frame.");
         }
         if (clipDurationMs > MAX_VIDEO_CLIP_MS) {
-          throw new Error("WebM export is limited to 10 seconds. Trim the clip and try again.");
+          throw new Error(`${formatLabel} export is limited to 10 seconds. Trim the clip and try again.`);
         }
 
         const { canvas, context } = createCanvas(outputWidth, outputHeight);
@@ -438,7 +458,6 @@ async function encodeVideo(sourceBlob, captions) {
           0,
         );
         stream = canvas.captureStream(15);
-        const mimeType = webmMimeType();
         recorder = new globalThis.MediaRecorder(stream, {
           mimeType,
           videoBitsPerSecond: 4_000_000,
@@ -449,10 +468,12 @@ async function encodeVideo(sourceBlob, captions) {
             if (event.data.size) chunks.push(event.data);
           });
           recorder.addEventListener("error", (event) => {
-            reject(event.error ?? new Error("The browser could not encode this WebM."));
+            reject(event.error ?? new Error(`The browser could not encode this ${formatLabel}.`));
           }, { once: true });
           recorder.addEventListener("stop", () => {
-            resolve(new Blob(chunks, { type: recorder.mimeType || mimeType }));
+            resolve(new Blob(chunks, {
+              type: format === "mp4" ? "video/mp4" : "video/webm",
+            }));
           }, { once: true });
         });
         recordingResult.catch(() => {});
@@ -484,7 +505,7 @@ async function encodeVideo(sourceBlob, captions) {
             }
             if (globalThis.performance.now() - playbackStartedAt > clipDurationMs / video.playbackRate + 5000) {
               video.pause();
-              reject(new Error("WebM capture timed out before the selected clip finished."));
+              reject(new Error(`${formatLabel} capture timed out before the selected clip finished.`));
               return;
             }
             animationFrameId = globalThis.requestAnimationFrame(drawFrame);
@@ -494,7 +515,7 @@ async function encodeVideo(sourceBlob, captions) {
 
         recorder.stop();
         const blob = await recordingResult;
-        if (!blob.size) throw new Error("The browser produced an empty WebM file.");
+        if (!blob.size) throw new Error(`The browser produced an empty ${formatLabel} file.`);
         return blob;
       } catch (cause) {
         if (video && !video.paused) video.pause();
@@ -509,8 +530,8 @@ async function encodeVideo(sourceBlob, captions) {
       }
     }
 
-    if (captions.outputFormat === "webm") {
-      return await encodeVideoAsWebM(video, captions);
+    if (captions.outputFormat === "webm" || captions.outputFormat === "mp4") {
+      return await encodeVideoWithRecorder(video, captions, captions.outputFormat);
     }
 
     const durationMs = Math.round(video.duration * 1000);

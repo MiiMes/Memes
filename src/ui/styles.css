@@ -194,6 +194,14 @@ h1, h2, h3, p { margin-top: 0; }
 .meme-editor-caption-canvas { position: absolute; z-index: 1; display: block; cursor: grab; pointer-events: auto; touch-action: none; }
 .meme-editor-preview-note { margin: 0; color: #89878a; font-size: 10px; }
 .meme-editor-controls { display: grid; gap: 16px; padding: 20px; border: 1px solid #e8e7e5; border-radius: 11px; background: white; }
+.meme-collaboration { display: grid; gap: 10px; padding: 12px; border: 1px solid #e8e7e5; border-radius: 7px; color: #555357; font-size: 11px; }
+.meme-collaboration summary { cursor: pointer; color: #272628; font-weight: 700; }
+.meme-collaboration > p { margin: 0; line-height: 1.5; }
+.meme-collaboration-note { color: #858387; font-size: 10px; }
+.meme-collaboration-status { overflow-wrap: anywhere; }
+.meme-collaboration-mode { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.meme-collaboration-mode button { min-height: 36px; border: 1px solid #e4e3e1; border-radius: 6px; background: white; font-size: 11px; }
+.meme-collaboration-mode button[aria-pressed="true"] { border-color: var(--coral); background: #fff1ed; }
 .meme-editor-controls .eyebrow { margin-bottom: 5px; }
 .meme-editor-controls h2 { margin: 0; font: 600 24px "Space Grotesk", sans-serif; letter-spacing: -1px; }
 .meme-editor-upload { display: grid; gap: 7px; padding: 12px; border: 1px dashed #d6d3d0; border-radius: 7px; color: #555357; background: #faf9f8; font-size: 11px; font-weight: 700; }

@@ -110,7 +110,9 @@ function normalizeSettings(settings) {
       ? Number(settings.gifColorCount)
       : 256,
     gifDithering: Boolean(settings.gifDithering),
-    videoOutputFormat: settings.videoOutputFormat === "webm" ? "webm" : "gif",
+    videoOutputFormat: ["webm", "mp4"].includes(settings.videoOutputFormat)
+      ? settings.videoOutputFormat
+      : "gif",
   };
 }
 
