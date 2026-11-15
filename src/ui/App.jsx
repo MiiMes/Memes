@@ -493,6 +493,29 @@ async function requestProviders({ providers, action, q = "", kind, locale, logRe
   return Object.fromEntries(entries);
 }
 
+function logTrendingSearchResults(results, locale) {
+  const giphyResult = results.giphy ?? { items: [] };
+  const tenorResult = results.tenor ?? { items: [] };
+  const giphyTerms = (giphyResult.items ?? []).map((term) => term.query || term.title);
+  const tenorTerms = (tenorResult.items ?? []).map((term) => term.query || term.title);
+  const normalize = (term) => String(term).trim().replace(/\s+/g, " ").toLowerCase();
+  const tenorTermSet = new Set(tenorTerms.map(normalize));
+  const overlapByTerm = new Map();
+
+  for (const term of giphyTerms) {
+    const key = normalize(term);
+    if (key && tenorTermSet.has(key)) overlapByTerm.set(key, term);
+  }
+
+  console.groupCollapsed(`🔥 Trending searches · ${locale}`);
+  console.log(`🟣 GIPHY · ${giphyTerms.length} results`, giphyTerms);
+  console.log(`🔵 Tenor · ${tenorTerms.length} results`, tenorTerms);
+  console.log(`🤝 Overlap · ${overlapByTerm.size} terms`, [...overlapByTerm.values()]);
+  if (giphyResult.error) console.warn(`⚠️ GIPHY request failed: ${giphyResult.error}`);
+  if (tenorResult.error) console.warn(`⚠️ Tenor request failed: ${tenorResult.error}`);
+  console.groupEnd();
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -529,13 +552,17 @@ function MemeApp() {
   });
   const trendingQuery = useQuery({
     queryKey: ["trending-searches", locale],
-    queryFn: () => requestProviders({
-      providers: TRENDING_SEARCH_PROVIDERS,
-      action: "trending-searches",
-      kind,
-      locale,
-      logRequest,
-    }),
+    queryFn: async () => {
+      const results = await requestProviders({
+        providers: TRENDING_SEARCH_PROVIDERS,
+        action: "trending-searches",
+        kind,
+        locale,
+        logRequest,
+      });
+      logTrendingSearchResults(results, locale);
+      return results;
+    },
     enabled: page === "home",
   });
   const categoryKind = page === "reactions" ? "gif" : kind;
