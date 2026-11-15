@@ -85,6 +85,7 @@ export function MediaCard({
       const copyFormat = await copyMediaToClipboard(item);
       const mediaName = item.kind === "sticker" ? "Sticker" : "GIF";
       const copyMessages = {
+        "legacy-html": "Legacy HTML copy was accepted; the target app determines whether it pastes the image or link.",
         "rich-html": "GIF copied as rich HTML; the app may paste its preview or the plain-text link.",
         "text-url": "Rich clipboard write failed; copied the GIF link instead.",
         "static-png": "GIF animation could not be copied; its first frame was copied as a static PNG.",
@@ -92,7 +93,7 @@ export function MediaCard({
         "web-custom": `${mediaName} browser-specific data was accepted; Discord may ignore it.`,
       };
       const message = copyFormat.method === "multi-format"
-        ? `Clipboard accepted ${copyFormat.formats.join(", ")}; app behavior varies and PNG is static.`
+        ? `Clipboard accepted ${copyFormat.formats.join(", ")}; the target app chooses which representation to paste.`
         : copyMessages[copyFormat.method] ?? `${mediaName} copy accepted by the browser.`;
       showCopyFeedback({
         tone: copyFormat.method === "web-custom" ? "error" : "success",
