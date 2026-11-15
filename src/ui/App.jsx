@@ -516,6 +516,55 @@ function logTrendingSearchResults(results, locale) {
   console.groupEnd();
 }
 
+function logReactionResults(results, providers, locale) {
+  const reactionTermsByProvider = Object.fromEntries(
+    providers.map((provider) => [provider, REACTIONS_BY_PROVIDER[provider] ?? []]),
+  );
+  const reactionTerms = new Map();
+
+  for (const [provider, terms] of Object.entries(reactionTermsByProvider)) {
+    for (const term of terms) {
+      const key = reactionKey(term);
+      const existing = reactionTerms.get(key);
+      if (existing) {
+        if (!existing.providers.includes(provider)) existing.providers.push(provider);
+      } else {
+        reactionTerms.set(key, { term, providers: [provider] });
+      }
+    }
+  }
+
+  const overlap = [...reactionTerms.values()].filter((entry) => entry.providers.length > 1);
+  console.groupCollapsed(`🎭 Reaction page results · ${locale}`);
+  console.groupCollapsed("🔎 Reaction terms shown");
+  for (const [provider, terms] of Object.entries(reactionTermsByProvider)) {
+    console.log(
+      `${provider === "giphy" ? "🟣" : provider === "tenor" ? "🔵" : "🟠"} ${PROVIDER_NAMES[provider]} · ${terms.length} results`,
+      terms,
+    );
+  }
+  console.log(
+    `🤝 Overlap · ${overlap.length} terms`,
+    overlap.map(({ term, providers: sources }) =>
+      `${term} (${sources.map((provider) => PROVIDER_NAMES[provider]).join(" + ")})`,
+    ),
+  );
+  console.groupEnd();
+
+  console.groupCollapsed("🧩 Provider category results used for previews");
+  for (const provider of providers) {
+    const result = results[provider] ?? { items: [] };
+    const categories = result.items ?? [];
+    console.log(
+      `${PROVIDER_NAMES[provider]} · ${categories.length} categories`,
+      categories.map((category) => category.title),
+    );
+    if (result.error) console.warn(`⚠️ ${PROVIDER_NAMES[provider]} request failed: ${result.error}`);
+  }
+  console.groupEnd();
+  console.groupEnd();
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -578,6 +627,7 @@ function MemeApp() {
         locale,
         logRequest,
       });
+      if (page === "reactions") logReactionResults(results, providers, locale);
       if (!useStaticTenorCategories) return results;
       const tenorCategories = results.tenor?.items ?? [];
       const categoryKey = (value) => String(value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
