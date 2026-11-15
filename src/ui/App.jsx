@@ -973,8 +973,43 @@ function ReactionTile({
 }
 
 function MediaCard({ item, onSelect }) {
+  const videoRef = useRef(null);
+  const [muted, setMuted] = useState(true);
+  const [audioBlocked, setAudioBlocked] = useState(false);
+
+  const playWithSound = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.muted = false;
+    setMuted(false);
+    video.play().then(
+      () => setAudioBlocked(false),
+      () => {
+        video.muted = true;
+        setMuted(true);
+        setAudioBlocked(true);
+      },
+    );
+  };
+
+  const muteVideo = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.muted = true;
+    setMuted(true);
+  };
+
   const content = item.video ? (
-    <video src={item.imageUrl} poster={item.posterUrl || undefined} autoPlay muted loop playsInline aria-label={item.title} />
+    <video
+      ref={videoRef}
+      src={item.imageUrl}
+      poster={item.posterUrl || undefined}
+      autoPlay
+      muted={muted}
+      loop
+      playsInline
+      aria-label={item.title}
+    />
   ) : (
     item.imageUrl
       ? <img src={item.imageUrl} alt={item.title} loading="lazy" />
@@ -982,10 +1017,18 @@ function MediaCard({ item, onSelect }) {
   );
   return (
     <article className="media-card">
-      <button className="media-button" onClick={onSelect} type="button" aria-label={`Search ${item.title}`}>
+      <button
+        className="media-button"
+        onClick={item.video ? playWithSound : onSelect}
+        onMouseEnter={item.video ? playWithSound : undefined}
+        onMouseLeave={item.video ? muteVideo : undefined}
+        type="button"
+        aria-label={item.video ? `Play ${item.title} with sound` : `Search ${item.title}`}
+      >
         {content}
         <span className="media-overlay">
           <span>{item.title}</span>
+          {audioBlocked && <span>Click to enable sound</span>}
           <span className={`attribution ${item.provider}`}>{PROVIDER_NAMES[item.provider]}</span>
         </span>
       </button>
