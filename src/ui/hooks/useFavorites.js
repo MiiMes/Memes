@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   deleteGeneratedGif,
+  exportFavoritesBackup,
+  importFavoritesBackup,
   isFavoriteItem,
   readGeneratedGif,
   readFavorites,
   readFavoriteCollections,
+  readFavoriteFonts,
   saveFavoriteCollection,
   saveGeneratedGif,
+  toggleFavoriteFont as toggleStoredFavoriteFont,
   toggleStoredFavorite,
   updateStoredFavorite,
 } from "../services/favorites.js";
@@ -14,6 +18,7 @@ import {
 export function useFavorites() {
   const [favoriteState, setFavoriteState] = useState(readFavorites);
   const [collectionState, setCollectionState] = useState(readFavoriteCollections);
+  const [favoriteFontState, setFavoriteFontState] = useState(readFavoriteFonts);
   const [hydratedState, setHydratedState] = useState({
     source: null,
     favorites: [],
@@ -142,6 +147,26 @@ export function useFavorites() {
     return !nextState.error;
   }, [favoriteState.favorites]);
 
+  const toggleFavoriteFont = useCallback((font) => {
+    const nextState = toggleStoredFavoriteFont(favoriteFontState.fonts, font);
+    setFavoriteFontState(nextState);
+    return !nextState.error;
+  }, [favoriteFontState.fonts]);
+
+  const exportData = useCallback(() => exportFavoritesBackup(
+    favoriteState.favorites,
+    collectionState.collections,
+    favoriteFontState.fonts,
+  ), [favoriteFontState.fonts, favoriteState.favorites, collectionState.collections]);
+
+  const importData = useCallback(async (file) => {
+    const imported = await importFavoritesBackup(file);
+    setFavoriteState({ favorites: imported.favorites, error: "" });
+    setCollectionState({ collections: imported.collections, error: "" });
+    setFavoriteFontState({ fonts: imported.favoriteFonts, error: "" });
+    return imported;
+  }, []);
+
   const hasHydratedFavorites = hydratedState.source === favoriteState.favorites;
   return {
     favorites: hasHydratedFavorites ? hydratedState.favorites : favoriteState.favorites,
@@ -153,6 +178,11 @@ export function useFavorites() {
     collectionsError: collectionState.error,
     isFavorite,
     toggleFavorite,
+    favoriteFonts: favoriteFontState.fonts,
+    favoriteFontsError: favoriteFontState.error,
+    toggleFavoriteFont,
+    exportData,
+    importData,
     createCollection,
     updateFavorite,
   };

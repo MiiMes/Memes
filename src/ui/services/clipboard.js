@@ -151,6 +151,26 @@ export async function copyAnimatedGifToClipboard(blob) {
   }
 }
 
+export async function copyPngToClipboard(blob) {
+  if (!blob || blob.type !== "image/png") {
+    throw new Error("The generated image is not a PNG.");
+  }
+  const clipboard = globalThis.navigator?.clipboard;
+  const ClipboardItemConstructor = globalThis.ClipboardItem;
+  if (typeof clipboard?.write !== "function" ||
+    typeof ClipboardItemConstructor !== "function") {
+    throw new Error("This browser does not support copying images to the clipboard.");
+  }
+  try {
+    await clipboard.write([
+      new ClipboardItemConstructor({ "image/png": blob }),
+    ]);
+  } catch (cause) {
+    const detail = cause instanceof Error ? ` ${cause.message}` : "";
+    throw new Error(`This browser rejected PNG clipboard data.${detail}`, { cause });
+  }
+}
+
 export async function copyMediaToClipboard(item) {
   const mediaUrl = item.imageUrl;
   if (!mediaUrl) throw new Error("This result has no media URL to copy.");

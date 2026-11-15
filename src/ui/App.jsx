@@ -43,7 +43,8 @@ function MemeApp() {
     copyJson, submitSearch, chooseSearch, toggleProvider, runApi, clearLogs,
     favorites, favoritesError, isFavorite, toggleFavorite,
     collections, collectionsError, createCollection, updateFavorite,
-    editorItem, editorFile, editorDraft, fileOpenError,
+    favoriteFonts, favoriteFontsError, toggleFavoriteFont, exportData, importData,
+    editorItem, editorSettings, editorFile, editorDraft, fileOpenError,
     openEditor, openDraftInEditor, closeEditor,
     recentSearches, recentSearchError, clearRecentSearches,
     resultsLayout, setResultsLayout,
@@ -162,12 +163,16 @@ function MemeApp() {
           ) : page === "editor" ? (
             <MemeEditor
               item={editorItem}
+              initialSettings={editorSettings}
               initialFile={editorFile}
               initialDraft={editorDraft}
               onClose={closeEditor}
               isFavorite={isFavorite}
               onToggleFavorite={toggleFavorite}
               favoritesError={favoritesError}
+              favoriteFonts={favoriteFonts}
+              favoriteFontsError={favoriteFontsError}
+              onToggleFavoriteFont={toggleFavoriteFont}
             />
           ) : page === "favorites" ? (
             <>
@@ -190,6 +195,8 @@ function MemeApp() {
                 onEdit={openEditor}
                 onFindSimilar={findSimilar}
                 onOpenDraft={openDraftInEditor}
+                onExportData={exportData}
+                onImportData={importData}
               />
             </>
           ) : (

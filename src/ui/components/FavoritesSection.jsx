@@ -14,6 +14,8 @@ export function FavoritesSection({
   onEdit,
   onFindSimilar,
   onOpenDraft,
+  onExportData,
+  onImportData,
 }) {
   const [collectionName, setCollectionName] = useState("");
   const [actionError, setActionError] = useState("");
@@ -28,7 +30,10 @@ export function FavoritesSection({
   const [deckFeedback, setDeckFeedback] = useState("");
   const [drafts, setDrafts] = useState([]);
   const [draftError, setDraftError] = useState("");
+  const [backupFeedback, setBackupFeedback] = useState("");
+  const [isBackingUp, setIsBackingUp] = useState(false);
   const deckRef = useRef(null);
+  const backupInputRef = useRef(null);
   const normalizedTagFilter = tagFilter.trim().toLocaleLowerCase();
   const normalizedLibraryQuery = libraryQuery.trim().toLocaleLowerCase();
   const expandedTerms = expandedSearchTerms.map((term) => term.toLocaleLowerCase());
@@ -185,6 +190,41 @@ export function FavoritesSection({
     }
   }
 
+  async function exportBackup() {
+    setIsBackingUp(true);
+    setBackupFeedback("");
+    try {
+      const backup = await onExportData();
+      const url = URL.createObjectURL(backup);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "miimes-data-backup.json";
+      link.click();
+      globalThis.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setBackupFeedback("Favorites, collections, and favorite fonts exported.");
+    } catch (cause) {
+      setBackupFeedback(`Backup could not be exported. ${cause instanceof Error ? cause.message : String(cause)}`);
+    } finally {
+      setIsBackingUp(false);
+    }
+  }
+
+  async function importBackup(file) {
+    if (!file) return;
+    setIsBackingUp(true);
+    setBackupFeedback("");
+    try {
+      const imported = await onImportData(file);
+      setBackupFeedback(
+        `Backup merged: ${imported.favorites.length} favorite(s), ${imported.collections.length} collection(s), and ${imported.favoriteFonts.length} favorite font(s).`,
+      );
+    } catch (cause) {
+      setBackupFeedback(`Backup could not be imported. ${cause instanceof Error ? cause.message : String(cause)}`);
+    } finally {
+      setIsBackingUp(false);
+    }
+  }
+
   return (
     <section className="favorites-section" aria-labelledby="favorites-heading">
       <header className="section-heading">
@@ -195,7 +235,33 @@ export function FavoritesSection({
         <span className="favorites-count">
           {favorites.length} {favorites.length === 1 ? "GIF" : "GIFs"}
         </span>
+        <div className="favorites-backup-actions">
+          <button type="button" onClick={exportBackup} disabled={isBackingUp}>
+            {isBackingUp ? "Working…" : "Export My Data"}
+          </button>
+          <button
+            type="button"
+            onClick={() => backupInputRef.current?.click()}
+            disabled={isBackingUp}
+          >
+            Import backup
+          </button>
+          <input
+            ref={backupInputRef}
+            type="file"
+            accept=".json,application/json"
+            hidden
+            onChange={(event) => {
+              void importBackup(event.target.files[0]);
+              event.target.value = "";
+            }}
+          />
+        </div>
       </header>
+      <p className="favorites-backup-note">
+        Backups merge into this browser. Generated GIFs are included; local drafts and source files stay on this device.
+      </p>
+      {backupFeedback && <p className="meme-editor-copy-feedback" role="status">{backupFeedback}</p>}
       <form className="favorite-collection-form" onSubmit={createCollection}>
         <label>
           <span>New collection</span>

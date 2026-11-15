@@ -143,6 +143,10 @@ h1, h2, h3, p { margin-top: 0; }
 .similar-results-note { margin: 0; color: #858387; font-size: 10px; }
 .favorites-section .section-heading { align-items: end; }
 .favorites-count { color: #89878a; font-size: 11px; }
+.favorites-backup-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+.favorites-backup-actions button { min-height: 34px; padding: 7px 10px; border: 1px solid #e4e3e1; border-radius: 6px; color: #333; background: white; font-size: 10px; font-weight: 700; }
+.favorites-backup-actions button:disabled { opacity: .6; cursor: wait; }
+.favorites-backup-note { margin: -12px 0 18px; color: #89878a; font-size: 10px; }
 .favorite-collection-form { display: flex; align-items: end; gap: 10px; margin-bottom: 20px; }
 .favorite-collection-form label, .favorite-details label { display: grid; flex: 1; gap: 6px; color: #77767a; font-size: 10px; font-weight: 700; }
 .favorite-collection-form input, .favorite-details input, .favorite-details select { min-width: 0; min-height: 34px; padding: 7px 9px; border: 1px solid #e2e0de; border-radius: 5px; color: #333; background: white; font-size: 10px; }

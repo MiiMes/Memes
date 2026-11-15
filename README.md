@@ -50,7 +50,8 @@ keyframed, and optional face detection can suggest positions across sampled
 video frames. Canvas presets support square, landscape, portrait, and story
 aspect ratios. **Export platform pack** creates a ZIP containing square,
 landscape, and story renders plus an editable `.meme` project. Portable project
-files bundle the source media and editor settings.
+files bundle the source media and editor settings. Canvas text layers support
+font choice, sizing, rotation, colors, Impact-style outlines, and drop shadows.
 
 Batch variations render up to four alternate captions. Caption suggestions can
 use the browser's built-in on-device multimodal `LanguageModel` API to inspect
@@ -64,14 +65,32 @@ image search.
 
 GIFs and still images can be downloaded or shared through the browser; GIF
 export is limited by the format's 256-color palette. Draft source files and
-settings, generated GIF favorites, favorite collections/tags, and recent
-searches are stored locally in the browser and are not synchronized across
-devices. Favorites search includes titles, captions, providers, and tags;
-saved drafts are searchable too. Where supported, **Search by meaning** expands
-a mood query with the browser's on-device language model and searches only the
-local library metadata. Reaction Deck presents filtered favorites in a
-fullscreen view with arrow-key/Space navigation and clipboard actions. The
-home search can show results grouped by provider or in one combined view.
+settings, generated GIF favorites, favorite collections/tags, favorite fonts,
+and recent searches are stored locally in the browser and are not synchronized
+across devices. Editor changes are automatically saved as local drafts after
+the media loads and are searchable with other drafts. Favorites can be exported
+to and merged from a JSON backup; generated GIF bytes are included, so backups
+can be large (50 MB maximum). Local drafts and their source files are not part
+of that backup.
+
+**Copy edit link** shares the HTTPS source URL and bounded editor settings in
+the URL fragment; no edit state is stored on a server. Anyone with the link can
+see its media URL and caption text. Local uploads cannot be embedded in a link;
+export a portable `.meme` project to share those edits. Source hosts may block
+browser-side access, and their media must be reachable for a recipient to load
+the edit.
+
+The editor supports drag-and-drop and paste for local media. On browsers that
+provide the File System Access API, **Save to folder** opens a native save
+picker; the usual download remains available as a fallback. Generated GIFs
+and PNG images can be copied with the Clipboard API where supported. Favorites
+search includes titles, captions, providers, and tags; saved drafts are
+searchable too. Where supported, **Search by meaning** expands a mood query
+with the browser's on-device language model and searches only local library
+metadata.
+Reaction Deck presents filtered favorites in a fullscreen view with
+arrow-key/Space navigation and clipboard actions. The home search can show
+results grouped by provider or in one combined view.
 
 On supported installed desktop PWAs, the manifest registers local image, video,
 and `.meme` project files for **Open with Memes**. Browser support varies; a
@@ -80,8 +99,11 @@ extension is in [`browser-extension/`](./browser-extension/); it opens a web
 image URL in the editor without host permissions or uploads. Some image hosts
 block browser-side editing, in which case download the image and open it
 locally. The installable PWA caches the app shell and static assets after the
-first visit, so saved editor data remains available offline; provider search
-still requires a network connection.
+first visit, and keeps up to 60 previously viewed external image previews for
+offline use. Local drafts and generated favorites remain on-device; provider
+search and uncached source media still require a network connection. Offline
+availability depends on the browser retaining its service-worker and cache
+storage.
 
 The language/region selector includes Tenor's documented search languages and
 common regional variants. Tenor receives both `locale` and `country`; KLIPY

@@ -1,6 +1,39 @@
 const CACHE_PREFIX = "memes-app-";
-const CACHE_NAME = `${CACHE_PREFIX}v2`;
+const CACHE_NAME = `${CACHE_PREFIX}v3`;
+const REMOTE_IMAGE_CACHE = "memes-remote-images-v1";
+const MAX_CACHED_REMOTE_IMAGES = 60;
 const APP_BASE = new URL("./", self.location.href);
+
+async function fetchRemoteImage(request) {
+  let cache;
+  let cached;
+  try {
+    cache = await caches.open(REMOTE_IMAGE_CACHE);
+    cached = await cache.match(request);
+  } catch (cause) {
+    console.error("Could not read the offline image cache.", cause);
+  }
+  if (cached) return cached;
+
+  try {
+    const response = await fetch(request);
+    if (cache && (response.ok || response.type === "opaque")) {
+      try {
+        await cache.put(request, response.clone());
+        const keys = await cache.keys();
+        if (keys.length > MAX_CACHED_REMOTE_IMAGES) {
+          await cache.delete(keys[0]);
+        }
+      } catch (cause) {
+        console.error("Could not cache a recently viewed image for offline use.", cause);
+      }
+    }
+    return response;
+  } catch (cause) {
+    if (cached) return cached;
+    throw cause;
+  }
+}
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -36,7 +69,12 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   const url = new URL(request.url);
-  if (request.method !== "GET" || url.origin !== self.location.origin) return;
+  if (request.method !== "GET") return;
+  if (request.destination === "image" && url.protocol === "https:" && url.origin !== self.location.origin) {
+    event.respondWith(fetchRemoteImage(request));
+    return;
+  }
+  if (url.origin !== self.location.origin) return;
   if (!url.href.startsWith(APP_BASE.href)) return;
 
   if (request.mode === "navigate") {

@@ -8,6 +8,7 @@ import { useFavorites } from "./useFavorites.js";
 import { useHashRoute } from "./useHashRoute.js";
 import { useProviderQueries } from "./useProviderQueries.js";
 import { rankSimilarMedia } from "../services/visualSimilarity.js";
+import { readMemeShareFromHash } from "../services/memeShare.js";
 
 const RECENT_SEARCHES_KEY = "memes:recent-searches:v1";
 
@@ -51,15 +52,21 @@ function loadRecentSearches() {
 
 export function useAppController() {
   const { page, navigate } = useHashRoute();
+  const [sharedMeme] = useState(readMemeShareFromHash);
   const {
     favorites, favoritesError, isFavorite, toggleFavorite,
     collections, collectionsError, createCollection, updateFavorite,
+    favoriteFonts, favoriteFontsError, toggleFavoriteFont, exportData, importData,
   } = useFavorites();
-  const [editorItem, setEditorItem] = useState(readEditorSourceFromHash);
+  const [editorItem, setEditorItem] = useState(() =>
+    sharedMeme.item ?? readEditorSourceFromHash(),
+  );
+  const [editorSettings, setEditorSettings] = useState(sharedMeme.settings);
   const [editorFile, setEditorFile] = useState(null);
   const [editorDraft, setEditorDraft] = useState(null);
-  const [fileOpenError, setFileOpenError] = useState("");
+  const [fileOpenError, setFileOpenError] = useState(sharedMeme.error);
   const [editorReturnPage, setEditorReturnPage] = useState("home");
+  const sharedHashRef = useRef(globalThis.location?.hash ?? "");
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
   const [kind, setKind] = useState("gif");
@@ -82,9 +89,28 @@ export function useAppController() {
   const [recentSearchState, setRecentSearchState] = useState(loadRecentSearches);
   const { searches: recentSearches, error: recentSearchError } = recentSearchState;
 
+  useEffect(() => {
+    function handleSharedHash() {
+      const hash = globalThis.location.hash;
+      if (hash === sharedHashRef.current) return;
+      sharedHashRef.current = hash;
+      const shared = readMemeShareFromHash(hash);
+      if (!shared.item && !shared.error) return;
+      setEditorItem(shared.item);
+      setEditorSettings(shared.settings);
+      setEditorFile(null);
+      setEditorDraft(null);
+      setFileOpenError(shared.error);
+      setEditorReturnPage("home");
+    }
+    globalThis.addEventListener("hashchange", handleSharedHash);
+    return () => globalThis.removeEventListener("hashchange", handleSharedHash);
+  }, []);
+
   const openLocalFile = useCallback((file) => {
     setFileOpenError("");
     setEditorItem(null);
+    setEditorSettings(null);
     setEditorFile(file);
     setEditorDraft(null);
     setEditorReturnPage(page === "editor" ? "home" : page);
@@ -187,6 +213,7 @@ export function useAppController() {
 
   function openEditor(item) {
     setEditorItem(item);
+    setEditorSettings(null);
     setEditorFile(null);
     setEditorDraft(null);
     setEditorReturnPage(page === "editor" ? "home" : page);
@@ -195,6 +222,7 @@ export function useAppController() {
 
   function openDraftInEditor(draft) {
     setEditorItem(null);
+    setEditorSettings(null);
     setEditorFile(null);
     setEditorDraft(draft);
     setEditorReturnPage(page === "editor" ? "favorites" : page);
@@ -202,6 +230,7 @@ export function useAppController() {
   }
 
   function closeEditor() {
+    setEditorSettings(null);
     setEditorFile(null);
     setEditorDraft(null);
     navigate(editorReturnPage);
@@ -335,8 +364,10 @@ export function useAppController() {
     page, query, setQuery, submittedQuery, kind, setKind, locale, setLocale,
     providers, logs, logRequest, mediaQuery, visibleResults,
     favorites, favoritesError, isFavorite, toggleFavorite,
+    favoriteFonts, favoriteFontsError, toggleFavoriteFont, exportData, importData,
     collections, collectionsError, createCollection, updateFavorite,
-    editorItem, editorFile, editorDraft, fileOpenError, openEditor, openDraftInEditor, closeEditor,
+    editorItem, editorSettings, editorFile, editorDraft, fileOpenError,
+    openEditor, openDraftInEditor, closeEditor,
     trendingSearchTerms, trendingSearchErrors, visibleCategories, categoriesQuery,
     apiAction, setApiAction, apiQuery, setApiQuery, apiQueryResult,
     consoleRoute, consoleJson, copied, copyJson, submitSearch, chooseSearch,

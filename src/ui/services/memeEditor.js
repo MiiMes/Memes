@@ -41,6 +41,12 @@ export function drawCaption(context, text, position, width, height, fontSizePerc
   context.lineWidth = style.strokeWidth ?? Math.max(2, fontSize * 0.12);
   context.strokeStyle = style.strokeColor ?? "#000";
   context.fillStyle = style.color ?? "#fff";
+  if (style.shadow) {
+    context.shadowColor = style.shadowColor ?? "#000000";
+    context.shadowBlur = Math.min(40, Math.max(0, style.shadowBlur ?? fontSize * 0.12));
+    context.shadowOffsetX = Math.min(40, Math.max(-40, style.shadowOffsetX ?? 2));
+    context.shadowOffsetY = Math.min(40, Math.max(-40, style.shadowOffsetY ?? 3));
+  }
 
   const lines = [];
   let line = "";

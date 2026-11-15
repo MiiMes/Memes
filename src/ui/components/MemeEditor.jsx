@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { copyAnimatedGifToClipboard } from "../services/clipboard.js";
+import { copyAnimatedGifToClipboard, copyPngToClipboard } from "../services/clipboard.js";
 import { createExportPack } from "../services/exportPack.js";
 import { deleteMemeDraft, readMemeDrafts, saveMemeDraft } from "../services/favorites.js";
+import { MEME_FONTS } from "../constants/memeFonts.js";
 import {
   createCaptionedMedia,
   drawMemeOverlays,
@@ -10,6 +11,7 @@ import {
   supportsWebMExport,
 } from "../services/memeEditor.js";
 import { createMemeProject, readMemeProject } from "../services/memeProject.js";
+import { createMemeShareUrl } from "../services/memeShare.js";
 
 const EXPORT_PRESETS = {
   original: null,
@@ -55,12 +57,16 @@ function seekVideoElement(video, timeSeconds) {
 
 export function MemeEditor({
   item,
+  initialSettings = null,
   initialFile = null,
   initialDraft = null,
   onClose,
   isFavorite,
   onToggleFavorite,
   favoritesError = "",
+  favoriteFonts = [],
+  favoriteFontsError = "",
+  onToggleFavoriteFont,
 }) {
   const [textLayers, setTextLayers] = useState([
     { id: "top", label: "Top text", text: "", position: "top" },
@@ -110,7 +116,13 @@ export function MemeEditor({
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [draftFeedback, setDraftFeedback] = useState("");
   const [projectFeedback, setProjectFeedback] = useState("");
+  const [shareLink, setShareLink] = useState("");
+  const [shareLinkFeedback, setShareLinkFeedback] = useState("");
+  const [fontFeedback, setFontFeedback] = useState("");
   const projectFileRef = useRef(null);
+  const autoDraftIdRef = useRef(initialDraft?.id ?? null);
+  const autoSaveSequenceRef = useRef(0);
+  const draftTitleRef = useRef(initialDraft?.title || item?.title || "");
   const [variantCaptions, setVariantCaptions] = useState("");
   const [variantItems, setVariantItems] = useState([]);
   const [isGeneratingVariants, setIsGeneratingVariants] = useState(false);
@@ -137,10 +149,36 @@ export function MemeEditor({
     : "image";
   const formatTime = (milliseconds) => `${(milliseconds / 1000).toFixed(1)}s`;
 
+  function createDraftRecord(sourceBlob, id) {
+    return {
+      id,
+      title: draftTitleRef.current || uploadedBlob?.name || item?.title || "Untitled meme",
+      sourceBlob,
+      textLayers,
+      strokes,
+      fontSizePercent,
+      transform,
+      timeline,
+      outputPreset,
+      gifColorCount,
+      gifDithering,
+      videoOutputFormat,
+      updatedAt: Date.now(),
+    };
+  }
+
   useEffect(() => {
     let active = true;
     readMemeDrafts().then((savedDrafts) => {
-      if (active) setDrafts(savedDrafts.sort((left, right) => right.updatedAt - left.updatedAt));
+      if (active) {
+        setDrafts((current) => {
+          const currentIds = new Set(current.map((draft) => draft.id));
+          return [
+            ...current,
+            ...savedDrafts.filter((draft) => !currentIds.has(draft.id)),
+          ].sort((left, right) => right.updatedAt - left.updatedAt);
+        });
+      }
     }).catch((cause) => {
       if (active) {
         setDraftFeedback(`Drafts could not be loaded. ${cause instanceof Error ? cause.message : String(cause)}`);
@@ -150,6 +188,21 @@ export function MemeEditor({
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!initialSettings) return;
+    setTextLayers(initialSettings.textLayers);
+    setSelectedTextId(initialSettings.textLayers[0]?.id ?? "top");
+    setStrokes(initialSettings.strokes);
+    setFontSizePercent(initialSettings.fontSizePercent);
+    setTransform(initialSettings.transform);
+    setTimeline(initialSettings.timeline);
+    setOutputPreset(initialSettings.outputPreset);
+    setGifColorCount(initialSettings.gifColorCount);
+    setGifDithering(initialSettings.gifDithering);
+    setVideoOutputFormat(initialSettings.videoOutputFormat);
+    invalidateOutput();
+  }, [initialSettings]);
 
   useEffect(() => {
     if (!uploadedBlob && !sourceUrl) return undefined;
@@ -181,6 +234,53 @@ export function MemeEditor({
       active = false;
     };
   }, [sourceUrl, uploadedBlob]);
+
+  useEffect(() => {
+    if (!mediaInfo || (!uploadedBlob && !sourceUrl)) return undefined;
+    const sequence = ++autoSaveSequenceRef.current;
+    const timeout = globalThis.setTimeout(async () => {
+      try {
+        let sourceBlob = uploadedBlob;
+        if (!sourceBlob) {
+          const response = await fetch(sourceUrl);
+          if (!response.ok) throw new Error(`Image request returned HTTP ${response.status}.`);
+          sourceBlob = await response.blob();
+        }
+        if (sequence !== autoSaveSequenceRef.current) return;
+        const id = autoDraftIdRef.current ?? createGeneratedFavoriteId().replace("edited-", "draft-");
+        autoDraftIdRef.current = id;
+        const draft = createDraftRecord(sourceBlob, id);
+        await saveMemeDraft(draft);
+        if (sequence !== autoSaveSequenceRef.current) return;
+        setDrafts((current) => [
+          draft,
+          ...current.filter((entry) => entry.id !== id),
+        ].sort((left, right) => right.updatedAt - left.updatedAt));
+        setDraftFeedback("Changes automatically saved in this browser.");
+      } catch (cause) {
+        if (sequence === autoSaveSequenceRef.current) {
+          setDraftFeedback(`Automatic save failed. ${cause instanceof Error ? cause.message : String(cause)}`);
+        }
+      }
+    }, 1000);
+    return () => {
+      globalThis.clearTimeout(timeout);
+      if (autoSaveSequenceRef.current === sequence) autoSaveSequenceRef.current += 1;
+    };
+  }, [
+    fontSizePercent,
+    gifColorCount,
+    gifDithering,
+    mediaInfo,
+    outputPreset,
+    sourceUrl,
+    strokes,
+    textLayers,
+    timeline,
+    transform,
+    uploadedBlob,
+    videoOutputFormat,
+  ]);
 
   useEffect(() => {
     setPreviewTimeMs((current) => Math.min(current, selectedDurationMs));
@@ -453,6 +553,8 @@ export function MemeEditor({
       return;
     }
 
+    autoDraftIdRef.current = null;
+    draftTitleRef.current = file.name || item?.title || "Untitled meme";
     setUploadedBlob(file);
     setUploadedUrl(URL.createObjectURL(file));
     setTimeline({ startMs: 0, endMs: 0, speed: 1, reverse: false });
@@ -463,6 +565,8 @@ export function MemeEditor({
     setGeneratedFavoriteItem(null);
     setExportError("");
     setCopyFeedback(null);
+    setShareLink("");
+    setShareLinkFeedback("");
     setFavoriteActionError("");
     setOutputActionFeedback("");
   }
@@ -478,23 +582,11 @@ export function MemeEditor({
         if (!response.ok) throw new Error(`Image request returned HTTP ${response.status}.`);
         sourceBlob = await response.blob();
       }
-      const draft = {
-        id: createGeneratedFavoriteId().replace("edited-", "draft-"),
-        title: uploadedBlob?.name || item?.title || "Untitled meme",
-        sourceBlob,
-        textLayers,
-        strokes,
-        fontSizePercent,
-        transform,
-        timeline,
-        outputPreset,
-        gifColorCount,
-        gifDithering,
-        videoOutputFormat,
-        updatedAt: Date.now(),
-      };
+      const id = autoDraftIdRef.current ?? createGeneratedFavoriteId().replace("edited-", "draft-");
+      const draft = createDraftRecord(sourceBlob, id);
       await saveMemeDraft(draft);
-      setDrafts((current) => [draft, ...current]);
+      autoDraftIdRef.current = id;
+      setDrafts((current) => [draft, ...current.filter((entry) => entry.id !== id)]);
       setDraftFeedback("Draft saved in this browser.");
     } catch (cause) {
       setDraftFeedback(`Draft could not be saved. ${cause instanceof Error ? cause.message : String(cause)}`);
@@ -541,6 +633,8 @@ export function MemeEditor({
     try {
       const project = await readMemeProject(file);
       const { settings } = project;
+      autoDraftIdRef.current = null;
+      draftTitleRef.current = project.sourceName || file.name || "Untitled meme";
       setUploadedBlob(project.sourceBlob);
       setUploadedUrl(URL.createObjectURL(project.sourceBlob));
       setTextLayers(settings.textLayers);
@@ -556,6 +650,8 @@ export function MemeEditor({
       setGifDithering(Boolean(settings.gifDithering));
       setVideoOutputFormat(settings.videoOutputFormat === "webm" ? "webm" : "gif");
       invalidateOutput();
+      setShareLink("");
+      setShareLinkFeedback("");
       setProjectFeedback(`Loaded project from ${file.name}.`);
     } catch (cause) {
       setProjectFeedback(`Project could not be imported. ${cause instanceof Error ? cause.message : String(cause)}`);
@@ -778,6 +874,8 @@ export function MemeEditor({
   }
 
   function loadDraft(draft) {
+    autoDraftIdRef.current = draft.id;
+    draftTitleRef.current = draft.title;
     setUploadedBlob(draft.sourceBlob);
     setUploadedUrl(URL.createObjectURL(draft.sourceBlob));
     setTextLayers(draft.textLayers);
@@ -800,6 +898,7 @@ export function MemeEditor({
   async function removeDraft(draft) {
     try {
       await deleteMemeDraft(draft.id);
+      if (autoDraftIdRef.current === draft.id) autoDraftIdRef.current = null;
       setDrafts((current) => current.filter((entry) => entry.id !== draft.id));
       setDraftFeedback("Draft removed.");
     } catch (cause) {
@@ -929,14 +1028,17 @@ export function MemeEditor({
   }
 
   async function copyMeme() {
-    if (!outputBlob || outputBlob.type !== "image/gif") return;
+    if (!outputBlob || !["image/gif", "image/png"].includes(outputBlob.type)) return;
     setIsCopying(true);
     setCopyFeedback(null);
     try {
-      await copyAnimatedGifToClipboard(outputBlob);
+      if (outputBlob.type === "image/gif") await copyAnimatedGifToClipboard(outputBlob);
+      else await copyPngToClipboard(outputBlob);
       setCopyFeedback({
         tone: "success",
-        message: "Animated GIF copied. Paste it into your target app to check support.",
+        message: outputBlob.type === "image/gif"
+          ? "Animated GIF copied. Paste it into your target app to check support."
+          : "Image copied. Paste it into your target app to check support.",
       });
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
@@ -960,6 +1062,44 @@ export function MemeEditor({
     link.click();
     globalThis.setTimeout(() => URL.revokeObjectURL(url), 1000);
     setOutputActionFeedback("Download started.");
+  }
+
+  async function saveMemeToFolder() {
+    if (!outputBlob || typeof globalThis.showSaveFilePicker !== "function") return;
+    const extension = outputBlob.type === "image/gif"
+      ? "gif"
+      : outputBlob.type === "video/webm"
+        ? "webm"
+        : "png";
+    let writable;
+    try {
+      const handle = await globalThis.showSaveFilePicker({
+        suggestedName: `meme.${extension}`,
+        types: [{
+          description: "Edited meme",
+          accept: { [outputBlob.type]: [`.${extension}`] },
+        }],
+      });
+      writable = await handle.createWritable();
+      await writable.write(outputBlob);
+      await writable.close();
+      setOutputActionFeedback("Meme saved to the selected location.");
+    } catch (cause) {
+      if (writable) {
+        try {
+          await writable.abort();
+        } catch (abortCause) {
+          setOutputActionFeedback(
+            `Saving failed and the temporary file could not be closed. ${
+              abortCause instanceof Error ? abortCause.message : String(abortCause)
+            }`,
+          );
+          return;
+        }
+      }
+      if (cause instanceof Error && cause.name === "AbortError") return;
+      setOutputActionFeedback(`Could not save to the selected location. ${cause instanceof Error ? cause.message : String(cause)}`);
+    }
   }
 
   async function shareMeme() {
@@ -986,6 +1126,47 @@ export function MemeEditor({
       const message = cause instanceof Error ? cause.message : String(cause);
       setOutputActionFeedback(`Could not share the meme. ${message}`);
     }
+  }
+
+  async function copyEditLink() {
+    setShareLinkFeedback("");
+    try {
+      const url = createMemeShareUrl({
+        sourceUrl,
+        title: item?.title || uploadedBlob?.name || "Shared meme",
+        provider: item?.provider || "local-media",
+        settings: {
+          textLayers,
+          strokes,
+          fontSizePercent,
+          transform,
+          timeline,
+          outputPreset,
+          gifColorCount,
+          gifDithering,
+          videoOutputFormat,
+        },
+      });
+      setShareLink(url);
+      if (typeof navigator.clipboard?.writeText !== "function") {
+        throw new Error("Clipboard access is unavailable. Copy the link from the field below.");
+      }
+      await navigator.clipboard.writeText(url);
+      setShareLinkFeedback("Edit link copied. Anyone with the link can open this edit.");
+    } catch (cause) {
+      setShareLinkFeedback(cause instanceof Error ? cause.message : String(cause));
+    }
+  }
+
+  function toggleSelectedFontFavorite() {
+    const font = selectedText?.fontFamily ?? MEME_FONTS[0].value;
+    if (!onToggleFavoriteFont) return;
+    const succeeded = onToggleFavoriteFont(font);
+    setFontFeedback(succeeded
+      ? favoriteFonts.includes(font)
+        ? "Font removed from favorites."
+        : "Font saved to favorites on this device."
+      : "Favorite font could not be saved.");
   }
 
   async function toggleGeneratedFavorite() {
@@ -1221,6 +1402,26 @@ export function MemeEditor({
           />
         </div>
         {projectFeedback && <p className="meme-editor-copy-feedback" role="status">{projectFeedback}</p>}
+        <button
+          className="meme-editor-secondary"
+          type="button"
+          onClick={copyEditLink}
+          disabled={isExporting}
+        >
+          Copy edit link
+        </button>
+        {shareLinkFeedback && <p className="meme-editor-copy-feedback" role="status">{shareLinkFeedback}</p>}
+        {shareLink && (
+          <label className="meme-editor-field">
+            <span>Shareable edit URL (contains the settings and media URL)</span>
+            <input
+              type="url"
+              readOnly
+              value={shareLink}
+              onFocus={(event) => event.target.select()}
+            />
+          </label>
+        )}
         {mediaInfoError && <p className="meme-editor-error" role="status">{mediaInfoError}</p>}
         {(mediaInfo?.isGif || mediaInfo?.isVideo) && (
           <div className="meme-editor-timeline">
@@ -1365,16 +1566,36 @@ export function MemeEditor({
             <label className="meme-editor-field">
               <span>Font</span>
               <select
-                value={selectedText.fontFamily ?? 'Impact, "Arial Black", sans-serif'}
+                value={selectedText.fontFamily ?? MEME_FONTS[0].value}
                 onChange={(event) => updateTextLayer(selectedText.id, { fontFamily: event.target.value })}
                 disabled={isExporting}
               >
-                <option value={'Impact, "Arial Black", sans-serif'}>Impact</option>
-                <option value="Arial, sans-serif">Arial</option>
-                <option value="Georgia, serif">Georgia</option>
-                <option value="monospace">Monospace</option>
+                {favoriteFonts.length > 0 && (
+                  <optgroup label="Favorite fonts">
+                    {MEME_FONTS.filter(({ value }) => favoriteFonts.includes(value)).map(({ value, label }) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </optgroup>
+                )}
+                <optgroup label="Fonts">
+                  {MEME_FONTS.filter(({ value }) => !favoriteFonts.includes(value)).map(({ value, label }) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </optgroup>
               </select>
             </label>
+            <button
+              className="meme-editor-secondary"
+              type="button"
+              onClick={toggleSelectedFontFavorite}
+              disabled={!onToggleFavoriteFont}
+            >
+              {favoriteFonts.includes(selectedText.fontFamily ?? MEME_FONTS[0].value)
+                ? "★ Remove favorite font"
+                : "☆ Save favorite font"}
+            </button>
+            {favoriteFontsError && <p className="meme-editor-error" role="status">{favoriteFontsError}</p>}
+            {fontFeedback && <p className="meme-editor-copy-feedback" role="status">{fontFeedback}</p>}
             <div className="meme-editor-style-row">
               <label className="meme-editor-field">
                 <span>Text color</span>
@@ -1540,6 +1761,42 @@ export function MemeEditor({
             </label>
           )}
         </>
+        )}
+        {selectedText && (
+          <>
+            <label className="meme-editor-draw-toggle">
+              <input
+                type="checkbox"
+                checked={Boolean(selectedText.shadow)}
+                onChange={(event) => updateTextLayer(selectedText.id, { shadow: event.target.checked })}
+              />
+              Drop shadow
+            </label>
+            {selectedText.shadow && (
+              <div className="meme-editor-style-row">
+                <label className="meme-editor-field">
+                  <span>Shadow color</span>
+                  <input
+                    type="color"
+                    value={selectedText.shadowColor ?? "#000000"}
+                    onChange={(event) => updateTextLayer(selectedText.id, { shadowColor: event.target.value })}
+                    disabled={isExporting}
+                  />
+                </label>
+                <label className="meme-editor-field">
+                  <span>Shadow blur <strong>{selectedText.shadowBlur ?? 6}px</strong></span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="40"
+                    value={selectedText.shadowBlur ?? 6}
+                    onChange={(event) => updateTextLayer(selectedText.id, { shadowBlur: Number(event.target.value) })}
+                    disabled={isExporting}
+                  />
+                </label>
+              </div>
+            )}
+          </>
         )}
         <div className="meme-editor-copilot">
           <strong>On-device Visual Meme Copilot</strong>
@@ -1819,14 +2076,18 @@ export function MemeEditor({
           >
             {isExportingPack ? "Building platform pack…" : "Export platform pack"}
           </button>
-          {outputBlob?.type === "image/gif" && (
+          {["image/gif", "image/png"].includes(outputBlob?.type) && (
             <button
               className="meme-editor-secondary"
               type="button"
               onClick={copyMeme}
               disabled={isCopying}
             >
-              {isCopying ? "Copying GIF…" : "Copy animated GIF"}
+              {isCopying
+                ? "Copying image…"
+                : outputBlob.type === "image/gif"
+                  ? "Copy animated GIF"
+                  : "Copy image"}
             </button>
           )}
         </div>
@@ -1836,6 +2097,11 @@ export function MemeEditor({
               <button className="meme-editor-secondary" type="button" onClick={downloadMeme}>
                 Download {outputBlob.type === "image/gif" ? "GIF" : outputBlob.type === "video/webm" ? "WebM" : "PNG"}
               </button>
+              {typeof globalThis.showSaveFilePicker === "function" && (
+                <button className="meme-editor-secondary" type="button" onClick={saveMemeToFolder}>
+                  Save to folder…
+                </button>
+              )}
               <button className="meme-editor-secondary" type="button" onClick={shareMeme}>
                 Share meme
               </button>
@@ -1920,16 +2186,20 @@ export function MemeEditor({
                     ? "Right-click the GIF to copy it, or use the buttons to download or share."
                     : outputBlob?.type === "video/webm"
                       ? "WebM is video-only with no audio. Download or share the edited clip."
-                      : "Download or share your edited image."}
+                      : "Copy, download, or share your edited image."}
                 </p>
-                {outputBlob?.type === "image/gif" && (
+                {["image/gif", "image/png"].includes(outputBlob?.type) && (
                   <button
                     className="meme-editor-primary meme-editor-dialog-copy"
                     type="button"
                     onClick={copyMeme}
                     disabled={isCopying}
                   >
-                    {isCopying ? "Copying GIF…" : "Click to Copy"}
+                      {isCopying
+                        ? "Copying image…"
+                        : outputBlob.type === "image/gif"
+                          ? "Click to Copy GIF"
+                          : "Click to Copy Image"}
                   </button>
                 )}
                 <div className="meme-editor-dialog-actions">

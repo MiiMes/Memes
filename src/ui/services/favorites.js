@@ -1,8 +1,14 @@
+import { MEME_FONT_FAMILIES } from "../constants/memeFonts.js";
+
 const FAVORITES_STORAGE_KEY = "memes:favorites:v1";
 const COLLECTIONS_STORAGE_KEY = "memes:favorite-collections:v1";
+const FAVORITE_FONTS_STORAGE_KEY = "memes:favorite-fonts:v1";
 const GENERATED_GIFS_DB = "memes:generated-favorites";
 const GENERATED_GIFS_STORE = "gifs";
 const MEME_DRAFTS_STORE = "drafts";
+const FAVORITES_BACKUP_FORMAT = "miimes-favorites-backup";
+const MAX_BACKUP_BYTES = 50 * 1024 * 1024;
+const MAX_GENERATED_GIF_BYTES = 20 * 1024 * 1024;
 
 function normalizeFavorite(item) {
   if (
@@ -143,6 +149,246 @@ export function deleteMemeDraft(id) {
     (store) => store.delete(id),
     MEME_DRAFTS_STORE,
   );
+}
+
+function bytesToBase64(bytes) {
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  return btoa(binary);
+}
+
+function base64ToBlob(dataUrl) {
+  const match = /^data:image\/gif;base64,([A-Za-z0-9+/=\r\n]+)$/.exec(dataUrl);
+  if (!match || match[1].length > Math.ceil(MAX_GENERATED_GIF_BYTES * 4 / 3) + 8) {
+    throw new Error("The backup contains invalid or oversized generated GIF data.");
+  }
+  const binary = atob(match[1].replace(/\s/g, ""));
+  if (binary.length > MAX_GENERATED_GIF_BYTES) {
+    throw new Error("A generated GIF in the backup exceeds the 20 MB limit.");
+  }
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  return new Blob([bytes], { type: "image/gif" });
+}
+
+function isSafeFavoriteSource(value, allowPlaceholder = false) {
+  if (allowPlaceholder && value === "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=") {
+    return true;
+  }
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+}
+
+function createCollectionId() {
+  const uniqueId = globalThis.crypto?.randomUUID?.() ??
+    `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `collection-${uniqueId}`;
+}
+
+export async function exportFavoritesBackup(favorites, collections, favoriteFonts = []) {
+  const backupFavorites = await Promise.all(favorites.map(async (favorite) => {
+    if (!favorite.generatedGifId) {
+      if (!isSafeFavoriteSource(favorite.imageUrl)) {
+        throw new Error(`Favorite "${favorite.title}" does not have a portable HTTPS image URL.`);
+      }
+      return favorite;
+    }
+    if (!isSafeFavoriteSource(favorite.imageUrl, true)) {
+      throw new Error(`Favorite "${favorite.title}" does not have a portable HTTPS source URL.`);
+    }
+
+    const blob = await readGeneratedGif(favorite.generatedGifId);
+    if (!(blob instanceof Blob) || blob.type !== "image/gif") {
+      throw new Error(`Generated GIF data for "${favorite.title}" is unavailable.`);
+    }
+    if (blob.size > MAX_GENERATED_GIF_BYTES) {
+      throw new Error(`Generated GIF "${favorite.title}" exceeds the 20 MB backup limit.`);
+    }
+    const dataUrl = `data:image/gif;base64,${bytesToBase64(new Uint8Array(await blob.arrayBuffer()))}`;
+    return { ...favorite, generatedGifDataUrl: dataUrl };
+  }));
+  const payload = {
+    format: FAVORITES_BACKUP_FORMAT,
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    favorites: backupFavorites,
+    collections,
+    favoriteFonts: favoriteFonts.filter((font) => MEME_FONT_FAMILIES.has(font)),
+  };
+  const serialized = JSON.stringify(payload);
+  if (new Blob([serialized]).size > MAX_BACKUP_BYTES) {
+    throw new Error("This backup exceeds 50 MB. Remove some generated GIF favorites and try again.");
+  }
+  return new Blob([serialized], { type: "application/json" });
+}
+
+export async function importFavoritesBackup(file) {
+  if (!(file instanceof Blob) || file.size > MAX_BACKUP_BYTES) {
+    throw new Error("Choose a valid favorites backup under 50 MB.");
+  }
+
+  let backup;
+  try {
+    backup = JSON.parse(await file.text());
+  } catch (cause) {
+    throw new Error("The favorites backup is not valid JSON.", { cause });
+  }
+  if (
+    backup?.format !== FAVORITES_BACKUP_FORMAT ||
+    backup.version !== 1 ||
+    !Array.isArray(backup.favorites) ||
+    backup.favorites.length > 1000 ||
+    !Array.isArray(backup.collections) ||
+    backup.collections.length > 200 ||
+    !Array.isArray(backup.favoriteFonts ?? [])
+  ) {
+    throw new Error("This is not a supported Memes favorites backup.");
+  }
+
+  const currentFavorites = readFavorites().favorites;
+  const currentCollections = readFavoriteCollections().collections;
+  const mergedCollections = [...currentCollections];
+  const usedCollectionIds = new Set(currentCollections.map(({ id }) => id));
+  const collectionIdMap = new Map();
+  for (const collection of backup.collections) {
+    if (
+      !collection ||
+      typeof collection.id !== "string" ||
+      typeof collection.name !== "string" ||
+      !collection.name.trim()
+    ) {
+      throw new Error("The backup contains an invalid collection.");
+    }
+    const existing = mergedCollections.find((entry) =>
+      entry.name.toLocaleLowerCase() === collection.name.trim().toLocaleLowerCase(),
+    );
+    if (existing) {
+      collectionIdMap.set(collection.id, existing.id);
+      continue;
+    }
+    let id = collection.id;
+    if (usedCollectionIds.has(id)) id = createCollectionId();
+    usedCollectionIds.add(id);
+    collectionIdMap.set(collection.id, id);
+    mergedCollections.push({ id, name: collection.name.trim().slice(0, 40) });
+  }
+
+  const importedFavorites = [];
+  const generatedBlobs = new Map();
+  for (const entry of backup.favorites) {
+    if (!normalizeFavorite(entry)) throw new Error("The backup contains an invalid favorite.");
+    const favorite = normalizeFavorite({
+      ...entry,
+      collectionIds: (entry.collectionIds ?? [])
+        .map((id) => collectionIdMap.get(id))
+        .filter(Boolean),
+    });
+    if (entry.generatedGifId) {
+      if (typeof entry.generatedGifDataUrl !== "string") {
+        throw new Error(`The backup is missing generated GIF data for "${favorite.title}".`);
+      }
+      generatedBlobs.set(entry.generatedGifId, base64ToBlob(entry.generatedGifDataUrl));
+    } else if (!isSafeFavoriteSource(favorite.imageUrl)) {
+      throw new Error(`Favorite "${favorite.title}" must have a public HTTPS image URL.`);
+    }
+    if (entry.generatedGifId && !isSafeFavoriteSource(favorite.imageUrl, true)) {
+      throw new Error(`Favorite "${favorite.title}" has an unsupported source URL.`);
+    }
+    importedFavorites.push(favorite);
+  }
+
+  const byKey = new Map(currentFavorites.map((favorite) => [favoriteKey(favorite), favorite]));
+  importedFavorites.forEach((favorite) => {
+    const key = favoriteKey(favorite);
+    const existing = byKey.get(key);
+    byKey.set(key, existing
+      ? { ...existing, ...favorite, collectionIds: favorite.collectionIds }
+      : favorite);
+  });
+  const mergedFavorites = Array.from(byKey.values());
+  const mergedFonts = [...new Set([
+    ...readFavoriteFonts().fonts,
+    ...(backup.favoriteFonts ?? []).filter((font) => MEME_FONT_FAMILIES.has(font)),
+  ])];
+
+  const previousBlobs = new Map();
+  const savedIds = [];
+  try {
+    for (const [id, blob] of generatedBlobs) {
+      previousBlobs.set(id, await readGeneratedGif(id));
+      await saveGeneratedGif(id, blob);
+      savedIds.push(id);
+    }
+
+    const storage = globalThis.localStorage;
+    const previousValues = [
+      [FAVORITES_STORAGE_KEY, storage.getItem(FAVORITES_STORAGE_KEY)],
+      [COLLECTIONS_STORAGE_KEY, storage.getItem(COLLECTIONS_STORAGE_KEY)],
+      [FAVORITE_FONTS_STORAGE_KEY, storage.getItem(FAVORITE_FONTS_STORAGE_KEY)],
+    ];
+    try {
+      storage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(mergedFavorites));
+      storage.setItem(COLLECTIONS_STORAGE_KEY, JSON.stringify(mergedCollections));
+      storage.setItem(FAVORITE_FONTS_STORAGE_KEY, JSON.stringify(mergedFonts));
+    } catch (cause) {
+      for (const [key, value] of previousValues) {
+        if (value === null) storage.removeItem(key);
+        else storage.setItem(key, value);
+      }
+      throw cause;
+    }
+  } catch (cause) {
+    for (const id of savedIds) {
+      const previous = previousBlobs.get(id);
+      if (previous) await saveGeneratedGif(id, previous);
+      else await deleteGeneratedGif(id);
+    }
+    throw new Error(`Favorites backup could not be imported. ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+  }
+
+  return {
+    favorites: mergedFavorites,
+    collections: mergedCollections,
+    favoriteFonts: mergedFonts,
+  };
+}
+
+export function readFavoriteFonts() {
+  try {
+    const stored = globalThis.localStorage.getItem(FAVORITE_FONTS_STORAGE_KEY);
+    const parsed = stored ? JSON.parse(stored) : [];
+    if (!Array.isArray(parsed)) throw new Error("Saved favorite fonts are invalid.");
+    return {
+      fonts: [...new Set(parsed.filter((font) => MEME_FONT_FAMILIES.has(font)))],
+      error: "",
+    };
+  } catch (cause) {
+    return {
+      fonts: [],
+      error: `Favorite fonts could not be loaded.${cause instanceof Error ? ` ${cause.message}` : ""}`,
+    };
+  }
+}
+
+export function toggleFavoriteFont(fonts, font) {
+  if (!MEME_FONT_FAMILIES.has(font)) throw new Error("Choose a supported font.");
+  const nextFonts = fonts.includes(font)
+    ? fonts.filter((entry) => entry !== font)
+    : [...fonts, font];
+  try {
+    globalThis.localStorage.setItem(FAVORITE_FONTS_STORAGE_KEY, JSON.stringify(nextFonts));
+    return { fonts: nextFonts, error: "" };
+  } catch (cause) {
+    return {
+      fonts,
+      error: `Favorite fonts could not be saved.${cause instanceof Error ? ` ${cause.message}` : ""}`,
+    };
+  }
 }
 
 export function readFavorites() {
