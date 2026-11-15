@@ -7,24 +7,38 @@ const MAX_GIF_BYTES = 20 * 1024 * 1024;
 const MAX_GIF_FRAMES = 120;
 const MAX_GIF_PIXELS = 1_500_000;
 const MAX_TOTAL_FRAME_PIXELS = 30_000_000;
+const BAYER_4X4 = [
+  [0, 8, 2, 10],
+  [12, 4, 14, 6],
+  [3, 11, 1, 9],
+  [15, 7, 13, 5],
+];
 
-export function drawCaption(context, text, position, width, height, fontSizePercent) {
-  const normalizedText = text.trim().toUpperCase();
+export function drawCaption(context, text, position, width, height, fontSizePercent, style = {}) {
+  const normalizedText = style.uppercase === false ? text.trim() : text.trim().toUpperCase();
   if (!normalizedText) return;
 
-  const fontSize = Math.max(
-    12,
-    Math.min(150, width * (fontSizePercent / 100), height * 0.22),
-  );
+  const fontSize = Math.max(12, Math.min(
+    150,
+    width * ((style.fontSizePercent ?? fontSizePercent) / 100),
+    height * 0.22,
+  ));
   const lineHeight = fontSize * 1.08;
-  const maxWidth = width * 0.92;
-  context.font = `900 ${fontSize}px Impact, "Arial Black", sans-serif`;
-  context.textAlign = "center";
+  const maxWidth = width * (style.maxWidthPercent ?? 0.92);
+  const x = (style.x ?? 0.5) * width;
+  const y = style.y == null
+    ? null
+    : style.y * height;
+  context.save();
+  context.translate(x, y ?? 0);
+  if (style.rotation) context.rotate((style.rotation * Math.PI) / 180);
+  context.font = `${style.fontWeight ?? 900} ${fontSize}px ${style.fontFamily ?? 'Impact, "Arial Black", sans-serif'}`;
+  context.textAlign = style.align ?? "center";
   context.textBaseline = "middle";
   context.lineJoin = "round";
-  context.lineWidth = Math.max(2, fontSize * 0.12);
-  context.strokeStyle = "#000";
-  context.fillStyle = "#fff";
+  context.lineWidth = style.strokeWidth ?? Math.max(2, fontSize * 0.12);
+  context.strokeStyle = style.strokeColor ?? "#000";
+  context.fillStyle = style.color ?? "#fff";
 
   const lines = [];
   let line = "";
@@ -43,15 +57,76 @@ export function drawCaption(context, text, position, width, height, fontSizePerc
   if (lines.length > visibleLines.length) {
     visibleLines[visibleLines.length - 1] = `${visibleLines.at(-1)}…`;
   }
-  const firstY = position === "top"
-    ? fontSize * 0.72
-    : height - fontSize * 0.72 - lineHeight * (visibleLines.length - 1);
+  const firstY = y != null
+    ? -lineHeight * (visibleLines.length - 1) / 2
+    : position === "top"
+      ? fontSize * 0.72
+      : height - fontSize * 0.72 - lineHeight * (visibleLines.length - 1);
 
   visibleLines.forEach((captionLine, index) => {
     const y = firstY + lineHeight * index;
-    context.strokeText(captionLine, width / 2, y, maxWidth);
-    context.fillText(captionLine, width / 2, y, maxWidth);
+    if (style.outline !== false) context.strokeText(captionLine, 0, y, maxWidth);
+    context.fillText(captionLine, 0, y, maxWidth);
   });
+  context.restore();
+}
+
+export function drawMemeOverlays(context, textLayers, strokes, width, height, fontSizePercent) {
+  textLayers.forEach((layer) => {
+    drawCaption(
+      context,
+      layer.text,
+      layer.position ?? "custom",
+      width,
+      height,
+      fontSizePercent,
+      layer,
+    );
+  });
+
+  strokes.forEach((stroke) => {
+    context.save();
+    context.strokeStyle = stroke.color;
+    context.lineWidth = Math.max(1, width * stroke.widthPercent);
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    context.beginPath();
+    context.moveTo(stroke.points[0].x * width, stroke.points[0].y * height);
+    if (stroke.points.length === 1) {
+      context.lineTo(stroke.points[0].x * width + 0.01, stroke.points[0].y * height);
+    }
+    stroke.points.slice(1).forEach(({ x, y }) => {
+      context.lineTo(x * width, y * height);
+    });
+    context.stroke();
+    context.restore();
+  });
+}
+
+function drawTransformedSource(context, source, width, height, transform = {}) {
+  const zoom = Math.max(1, Math.min(2, Number(transform.zoom) || 1));
+  const brightness = Math.max(50, Math.min(150, Number(transform.brightness) || 100));
+  const contrast = Math.max(50, Math.min(150, Number(transform.contrast) || 100));
+  context.save();
+  context.filter = `brightness(${brightness}%) contrast(${contrast}%)`;
+  context.translate(width / 2, height / 2);
+  context.scale(zoom * (transform.flipX ? -1 : 1), zoom);
+  context.drawImage(source, -width / 2, -height / 2, width, height);
+  context.restore();
+}
+
+function ditherPixels(frameData, width, height) {
+  const dithered = new Uint8ClampedArray(frameData);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const offset = (BAYER_4X4[y % 4][x % 4] - 7.5) * 2;
+      const pixelOffset = (y * width + x) * 4;
+      dithered[pixelOffset] += offset;
+      dithered[pixelOffset + 1] += offset;
+      dithered[pixelOffset + 2] += offset;
+    }
+  }
+  return dithered;
 }
 
 function createCanvas(width, height) {
@@ -63,20 +138,24 @@ function createCanvas(width, height) {
   return { canvas, context };
 }
 
-export async function createCaptionedGif(imageUrl, captions) {
-  const response = await fetch(imageUrl);
-  if (!response.ok) throw new Error(`GIF request returned HTTP ${response.status}.`);
-  const sourceBlob = await response.blob();
+async function loadSourceBlob(source) {
+  if (source instanceof Blob) return source;
+  const response = await fetch(source);
+  if (!response.ok) throw new Error(`Image request returned HTTP ${response.status}.`);
+  return response.blob();
+}
+
+function isGif(bytes) {
+  const signature = new TextDecoder().decode(bytes.slice(0, 6));
+  return signature === "GIF87a" || signature === "GIF89a";
+}
+
+async function encodeGif(sourceBlob, captions) {
   if (sourceBlob.size > MAX_GIF_BYTES) {
     throw new Error("This GIF is too large to edit in the browser.");
   }
 
   const bytes = await sourceBlob.arrayBuffer();
-  const signature = new TextDecoder().decode(bytes.slice(0, 6));
-  if (signature !== "GIF87a" && signature !== "GIF89a") {
-    throw new Error("This result is not an animated GIF that the editor can decode.");
-  }
-
   let parsedGif;
   try {
     parsedGif = parseGIF(bytes);
@@ -132,13 +211,31 @@ export async function createCaptionedGif(imageUrl, captions) {
     patch.context.putImageData(patchImage, 0, 0);
     base.context.drawImage(patch.canvas, frame.dims.left, frame.dims.top);
 
-    output.context.drawImage(base.canvas, 0, 0);
-    drawCaption(output.context, captions.topText, "top", width, height, captions.fontSizePercent);
-    drawCaption(output.context, captions.bottomText, "bottom", width, height, captions.fontSizePercent);
+    drawTransformedSource(
+      output.context,
+      base.canvas,
+      width,
+      height,
+      captions.transform,
+    );
+    drawMemeOverlays(
+      output.context,
+      captions.textLayers ?? [
+        { text: captions.topText, position: "top" },
+        { text: captions.bottomText, position: "bottom" },
+      ],
+      captions.strokes ?? [],
+      width,
+      height,
+      captions.fontSizePercent,
+    );
 
     const frameData = output.context.getImageData(0, 0, width, height).data;
-    const palette = quantize(frameData, 256);
-    const indexedFrame = applyPalette(frameData, palette);
+    const palette = quantize(frameData, Math.max(2, Math.min(256, captions.colorCount ?? 256)));
+    const indexedFrame = applyPalette(
+      captions.dither ? ditherPixels(frameData, width, height) : frameData,
+      palette,
+    );
     encoder.writeFrame(indexedFrame, width, height, {
       palette,
       delay: Math.max(20, Math.round(frame.delay ?? 100)),
@@ -155,4 +252,66 @@ export async function createCaptionedGif(imageUrl, captions) {
 
   encoder.finish();
   return new Blob([encoder.bytes()], { type: "image/gif" });
+}
+
+async function encodeImage(sourceBlob, captions) {
+  if (sourceBlob.size > MAX_GIF_BYTES) {
+    throw new Error("This image is too large to edit in the browser.");
+  }
+
+  const imageUrl = URL.createObjectURL(sourceBlob);
+  try {
+    const image = new globalThis.Image();
+    image.src = imageUrl;
+    if (typeof image.decode === "function") {
+      await image.decode();
+    } else {
+      await new Promise((resolve, reject) => {
+        image.onload = resolve;
+        image.onerror = () => reject(new Error("The image could not be decoded."));
+      });
+    }
+
+    const { naturalWidth: width, naturalHeight: height } = image;
+    if (!width || !height || width * height > MAX_GIF_PIXELS) {
+      throw new Error("This image is too large to edit in the browser.");
+    }
+
+    const { canvas, context } = createCanvas(width, height);
+    drawTransformedSource(context, image, width, height, captions.transform);
+    drawMemeOverlays(
+      context,
+      captions.textLayers ?? [
+        { text: captions.topText, position: "top" },
+        { text: captions.bottomText, position: "bottom" },
+      ],
+      captions.strokes ?? [],
+      width,
+      height,
+      captions.fontSizePercent,
+    );
+    return await new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error("The edited image could not be exported."));
+      }, "image/png");
+    });
+  } finally {
+    URL.revokeObjectURL(imageUrl);
+  }
+}
+
+export async function createCaptionedGif(source, captions) {
+  const sourceBlob = await loadSourceBlob(source);
+  if (!isGif(await sourceBlob.slice(0, 6).arrayBuffer())) {
+    throw new Error("This result is not an animated GIF that the editor can decode.");
+  }
+  return encodeGif(sourceBlob, captions);
+}
+
+export async function createCaptionedMedia(source, captions) {
+  const sourceBlob = await loadSourceBlob(source);
+  return isGif(await sourceBlob.slice(0, 6).arrayBuffer())
+    ? encodeGif(sourceBlob, captions)
+    : encodeImage(sourceBlob, captions);
 }

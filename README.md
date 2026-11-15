@@ -39,6 +39,15 @@ reactions without one, it lazily searches that provider for a single preview
 when the tile scrolls into view; TanStack Query caches fetched previews during
 the session.
 
+The browser-only meme editor accepts uploaded or provider GIFs and images,
+supports draggable text and sticker layers, drawing, image adjustments, and
+GIF palette/dithering options. GIFs and still images can be downloaded or
+shared through the browser; GIF export is limited by the format's 256-color
+palette. Draft source files and settings, generated GIF favorites, favorite
+collections/tags, and recent searches are stored locally in the browser and
+are not synchronized across devices. The home search can show results grouped
+by provider or in one combined view.
+
 The language/region selector includes Tenor's documented search languages and
 common regional variants. Tenor receives both `locale` and `country`; KLIPY
 receives the combined locale. GIPHY search requests receive a supported `lang`

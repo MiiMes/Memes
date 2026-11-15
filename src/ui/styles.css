@@ -49,6 +49,11 @@ h1, h2, h3, p { margin-top: 0; }
 .search-form button { border: 0; border-radius: 7px; height: 44px; padding: 0 17px; color: #171718; background: var(--coral); font-weight: 700; font-size: 12px; }
 .search-form button:disabled { opacity: .55; cursor: default; }
 .search-form button span { margin-left: 9px; font-size: 16px; }
+.recent-searches { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 12px; }
+.recent-searches > span { color: #77767a; font-size: 9px; font-weight: 700; letter-spacing: 1.1px; }
+.recent-searches button { max-width: 180px; overflow: hidden; padding: 5px 9px; border: 1px solid #39383a; border-radius: 999px; color: #cfcdcf; background: #1d1d1f; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.recent-searches .clear-recent-searches { border-color: transparent; color: #9c9b9d; background: transparent; }
+.recent-search-error { margin: 8px 0 0; color: #ff9a82; font-size: 10px; }
 .provider-filters { display: flex; align-items: center; gap: 9px; margin-top: 17px; }
 .provider-filters > span, .trending-label { margin-right: 4px; color: #77767a; font-size: 9px; font-weight: 700; letter-spacing: 1.4px; }
 .provider-pill { display: inline-flex; align-items: center; gap: 7px; border: 1px solid #3c3b3d; border-radius: 20px; padding: 6px 10px; color: #aaa9ab; font-size: 10px; cursor: pointer; }
@@ -96,6 +101,9 @@ h1, h2, h3, p { margin-top: 0; }
 .section-heading { display: flex; justify-content: space-between; align-items: end; gap: 20px; margin-bottom: 27px; }
 .dark-eyebrow { margin-bottom: 8px; color: #aaa9aa; font-size: 9px; }
 .section-heading h2 { margin: 0; font: 600 30px "Space Grotesk", sans-serif; letter-spacing: -1.3px; }
+.results-layout-toggle { display: flex; gap: 3px; padding: 4px; border: 1px solid #e6e5e3; border-radius: 8px; background: white; }
+.results-layout-toggle button { padding: 8px 11px; border: 0; border-radius: 5px; color: #858487; background: transparent; font-size: 10px; font-weight: 600; white-space: nowrap; }
+.results-layout-toggle button.active { color: #171718; background: #f0efed; }
 .explore-results { display: grid; gap: 18px; }
 .explore-results-heading { display: flex; align-items: baseline; gap: 12px; }
 .explore-results-heading h3 { margin: 0; font: 600 18px "Space Grotesk", sans-serif; }
@@ -126,6 +134,19 @@ h1, h2, h3, p { margin-top: 0; }
 .favorite-button:focus-visible, .edit-meme-button:focus-visible { outline: 2px solid var(--coral); outline-offset: 2px; }
 .favorites-section .section-heading { align-items: end; }
 .favorites-count { color: #89878a; font-size: 11px; }
+.favorite-collection-form { display: flex; align-items: end; gap: 10px; margin-bottom: 20px; }
+.favorite-collection-form label, .favorite-details label { display: grid; flex: 1; gap: 6px; color: #77767a; font-size: 10px; font-weight: 700; }
+.favorite-collection-form input, .favorite-details input, .favorite-details select { min-width: 0; min-height: 34px; padding: 7px 9px; border: 1px solid #e2e0de; border-radius: 5px; color: #333; background: white; font-size: 10px; }
+.favorite-collection-form button { min-height: 34px; padding: 7px 10px; border: 0; border-radius: 5px; color: #171718; background: var(--coral); font-size: 10px; font-weight: 700; }
+.favorite-collection-form button:disabled { opacity: .55; cursor: default; }
+.favorite-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin-bottom: 20px; }
+.favorite-filters label { display: grid; min-width: 150px; gap: 6px; color: #77767a; font-size: 10px; font-weight: 700; }
+.favorite-filters select, .favorite-filters input { min-height: 34px; padding: 7px 9px; border: 1px solid #e2e0de; border-radius: 5px; background: white; font-size: 10px; }
+.favorite-filters > span { padding-bottom: 9px; color: #89878a; font-size: 10px; }
+.favorite-tile { break-inside: avoid; margin-bottom: 13px; }
+.favorite-tile .media-card { margin-bottom: 0; }
+.favorite-details { display: grid; gap: 8px; padding: 10px; background: white; }
+.favorite-details input, .favorite-details select { width: 100%; }
 .favorites-empty p { margin-bottom: 10px; }
 .favorites-empty a { color: #c94f3f; font-weight: 700; }
 .favorites-empty a:hover { text-decoration: underline; }
@@ -135,18 +156,45 @@ h1, h2, h3, p { margin-top: 0; }
 .meme-editor-back { justify-self: start; padding: 8px 11px; border: 1px solid #e4e3e1; border-radius: 6px; color: #555357; background: white; font-size: 11px; font-weight: 600; }
 .meme-editor-preview { position: relative; display: grid; min-height: 300px; max-height: 72vh; place-items: center; overflow: hidden; padding: 10px; border-radius: 11px; background: #171718; }
 .meme-editor-preview img { display: block; max-width: 100%; max-height: 70vh; object-fit: contain; }
-.meme-editor-caption-canvas { position: absolute; z-index: 1; display: block; pointer-events: none; }
+.meme-editor-caption-canvas { position: absolute; z-index: 1; display: block; cursor: grab; pointer-events: auto; touch-action: none; }
 .meme-editor-preview-note { margin: 0; color: #89878a; font-size: 10px; }
 .meme-editor-controls { display: grid; gap: 16px; padding: 20px; border: 1px solid #e8e7e5; border-radius: 11px; background: white; }
 .meme-editor-controls .eyebrow { margin-bottom: 5px; }
 .meme-editor-controls h2 { margin: 0; font: 600 24px "Space Grotesk", sans-serif; letter-spacing: -1px; }
+.meme-editor-upload { display: grid; gap: 7px; padding: 12px; border: 1px dashed #d6d3d0; border-radius: 7px; color: #555357; background: #faf9f8; font-size: 11px; font-weight: 700; }
+.meme-editor-upload input { width: 100%; color: #77767a; font-size: 10px; }
 .meme-editor-field { display: grid; gap: 7px; color: #555357; font-size: 11px; font-weight: 700; }
-.meme-editor-field textarea { min-height: 72px; resize: vertical; padding: 10px; border: 1px solid #e2e0de; border-radius: 6px; outline-color: var(--coral); color: #272628; background: #fff; font-size: 12px; }
+.meme-editor-field textarea, .meme-editor-field select { min-height: 40px; padding: 9px 10px; border: 1px solid #e2e0de; border-radius: 6px; outline-color: var(--coral); color: #272628; background: #fff; font-size: 12px; }
+.meme-editor-field textarea { min-height: 72px; resize: vertical; }
 .meme-editor-field textarea::placeholder { color: #aaa8aa; }
+.meme-editor-layer-list { display: flex; flex-wrap: wrap; gap: 7px; }
+.meme-editor-layer-list > button, .meme-editor-layer-item button { min-height: 31px; padding: 6px 9px; border: 1px solid #e4e3e1; border-radius: 5px; color: #555357; background: #fff; font-size: 10px; }
+.meme-editor-layer-list .selected { border-color: var(--coral); color: #272628; background: #fff1ed; }
+.meme-editor-layer-item { display: flex; gap: 3px; }
+.meme-editor-layer-item button:last-child { padding: 4px 8px; }
+.meme-editor-style-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.meme-editor-style-row input[type="color"], .meme-editor-draw-tools input[type="color"] { width: 100%; min-height: 37px; padding: 3px; border: 1px solid #e2e0de; border-radius: 5px; background: white; }
+.meme-editor-sticker-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; color: #555357; font-size: 11px; }
+.meme-editor-sticker-tools strong { margin-right: 4px; }
+.meme-editor-sticker-tools button { width: 35px; height: 35px; padding: 0; border: 1px solid #e4e3e1; border-radius: 6px; background: #fff; font-size: 19px; }
+.meme-editor-image-tools, .meme-editor-gif-quality { display: grid; gap: 12px; }
+.meme-editor-image-tools > strong, .meme-editor-gif-quality > strong { color: #555357; font-size: 11px; }
+.meme-editor-gif-quality small { color: #858387; font-size: 10px; line-height: 1.5; }
+.meme-editor-drafts { display: grid; gap: 9px; }
+.meme-editor-drafts > strong { color: #555357; font-size: 11px; }
+.meme-editor-draft { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.meme-editor-draft span { flex: 1; overflow: hidden; color: #77767a; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.meme-editor-draft button { min-height: 30px; padding: 5px 8px; border: 1px solid #e4e3e1; border-radius: 5px; background: white; font-size: 10px; }
+.meme-editor-draw-tools { display: grid; grid-template-columns: 1fr 54px; align-items: center; gap: 10px; padding: 12px; border: 1px solid #e8e7e5; border-radius: 7px; }
+.meme-editor-draw-toggle, .meme-editor-draw-width { display: flex; align-items: center; gap: 8px; color: #555357; font-size: 11px; font-weight: 700; }
+.meme-editor-draw-width { grid-column: 1 / -1; display: grid; gap: 6px; }
+.meme-editor-draw-tools > button { grid-column: 1 / -1; }
 .meme-font-size > span { display: flex; justify-content: space-between; }
 .meme-font-size strong { color: #77767a; }
 .meme-font-size input { width: 100%; accent-color: var(--coral); }
 .meme-editor-actions { display: grid; gap: 10px; }
+.meme-editor-output-actions, .meme-editor-dialog-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.meme-editor-dialog-actions { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
 .meme-editor-primary { min-height: 42px; border: 0; border-radius: 6px; color: #171718; background: var(--coral); font-size: 11px; font-weight: 700; }
 .meme-editor-primary:disabled { opacity: .6; cursor: wait; }
 .meme-editor-secondary { min-height: 40px; border: 1px solid #e7e6e3; border-radius: 6px; color: #333; background: #f7f7f5; font-size: 11px; font-weight: 700; }

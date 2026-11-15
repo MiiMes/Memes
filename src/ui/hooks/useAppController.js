@@ -8,9 +8,32 @@ import { useFavorites } from "./useFavorites.js";
 import { useHashRoute } from "./useHashRoute.js";
 import { useProviderQueries } from "./useProviderQueries.js";
 
+const RECENT_SEARCHES_KEY = "memes:recent-searches:v1";
+
+function loadRecentSearches() {
+  try {
+    const saved = globalThis.localStorage.getItem(RECENT_SEARCHES_KEY);
+    const parsed = saved ? JSON.parse(saved) : [];
+    return {
+      searches: Array.isArray(parsed)
+        ? parsed.filter((term) => typeof term === "string").slice(0, 8)
+        : [],
+      error: "",
+    };
+  } catch (cause) {
+    return {
+      searches: [],
+      error: `Recent searches could not be loaded. ${cause instanceof Error ? cause.message : ""}`,
+    };
+  }
+}
+
 export function useAppController() {
   const { page, navigate } = useHashRoute();
-  const { favorites, favoritesError, isFavorite, toggleFavorite } = useFavorites();
+  const {
+    favorites, favoritesError, isFavorite, toggleFavorite,
+    collections, collectionsError, createCollection, updateFavorite,
+  } = useFavorites();
   const [editorItem, setEditorItem] = useState(null);
   const [editorReturnPage, setEditorReturnPage] = useState("home");
   const [query, setQuery] = useState("");
@@ -23,6 +46,9 @@ export function useAppController() {
   const [apiQuery, setApiQuery] = useState("hello");
   const [apiRunId, setApiRunId] = useState(0);
   const [copied, setCopied] = useState(false);
+  const [resultsLayout, setResultsLayout] = useState("providers");
+  const [recentSearchState, setRecentSearchState] = useState(loadRecentSearches);
+  const { searches: recentSearches, error: recentSearchError } = recentSearchState;
 
   const logRequest = useCallback((entry) => {
     setLogs((current) => [entry, ...current].slice(0, 100));
@@ -48,14 +74,48 @@ export function useAppController() {
   function submitSearch(event) {
     event.preventDefault();
     const term = query.trim();
-    if (term) setSubmittedQuery(term);
+    if (term) {
+      setSubmittedQuery(term);
+      rememberSearch(term);
+    }
   }
 
   function chooseSearch(term, provider) {
     if (provider) setProviders([provider]);
     setQuery(term);
     setSubmittedQuery(term);
+    rememberSearch(term);
     navigate("home");
+  }
+
+  function rememberSearch(term) {
+    const normalized = term.trim().replace(/\s+/g, " ");
+    if (!normalized) return;
+    const nextSearches = [
+      normalized,
+      ...recentSearches.filter((entry) => entry.toLocaleLowerCase() !== normalized.toLocaleLowerCase()),
+    ].slice(0, 8);
+    try {
+      globalThis.localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(nextSearches));
+      setRecentSearchState({ searches: nextSearches, error: "" });
+    } catch (cause) {
+      setRecentSearchState({
+        searches: nextSearches,
+        error: `Recent searches could not be saved. ${cause instanceof Error ? cause.message : ""}`,
+      });
+    }
+  }
+
+  function clearRecentSearches() {
+    try {
+      globalThis.localStorage.removeItem(RECENT_SEARCHES_KEY);
+      setRecentSearchState({ searches: [], error: "" });
+    } catch (cause) {
+      setRecentSearchState({
+        searches: recentSearches,
+        error: `Recent searches could not be cleared. ${cause instanceof Error ? cause.message : ""}`,
+      });
+    }
   }
 
   function openEditor(item) {
@@ -152,10 +212,13 @@ export function useAppController() {
     page, query, setQuery, submittedQuery, kind, setKind, locale, setLocale,
     providers, logs, logRequest, mediaQuery, visibleResults,
     favorites, favoritesError, isFavorite, toggleFavorite,
+    collections, collectionsError, createCollection, updateFavorite,
     editorItem, openEditor, closeEditor,
     trendingSearchTerms, trendingSearchErrors, visibleCategories, categoriesQuery,
     apiAction, setApiAction, apiQuery, setApiQuery, apiQueryResult,
     consoleRoute, consoleJson, copied, copyJson, submitSearch, chooseSearch,
+    recentSearches, recentSearchError, clearRecentSearches,
+    resultsLayout, setResultsLayout,
     toggleProvider, runApi: () => setApiRunId((current) => current + 1),
     clearLogs: () => setLogs([]),
   };

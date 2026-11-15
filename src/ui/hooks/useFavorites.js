@@ -4,12 +4,16 @@ import {
   isFavoriteItem,
   readGeneratedGif,
   readFavorites,
+  readFavoriteCollections,
+  saveFavoriteCollection,
   saveGeneratedGif,
   toggleStoredFavorite,
+  updateStoredFavorite,
 } from "../services/favorites.js";
 
 export function useFavorites() {
   const [favoriteState, setFavoriteState] = useState(readFavorites);
+  const [collectionState, setCollectionState] = useState(readFavoriteCollections);
   const [hydratedState, setHydratedState] = useState({
     source: null,
     favorites: [],
@@ -127,6 +131,17 @@ export function useFavorites() {
     }
   }, [favoriteState.favorites]);
 
+  const createCollection = useCallback((name) => {
+    const collections = saveFavoriteCollection(collectionState.collections, name);
+    setCollectionState({ collections, error: "" });
+  }, [collectionState.collections]);
+
+  const updateFavorite = useCallback((item, details) => {
+    const nextState = updateStoredFavorite(favoriteState.favorites, item, details);
+    setFavoriteState(nextState);
+    return !nextState.error;
+  }, [favoriteState.favorites]);
+
   const hasHydratedFavorites = hydratedState.source === favoriteState.favorites;
   return {
     favorites: hasHydratedFavorites ? hydratedState.favorites : favoriteState.favorites,
@@ -134,7 +149,11 @@ export function useFavorites() {
       favoriteState.error,
       hasHydratedFavorites ? hydratedState.error : "",
     ].filter(Boolean).join(" "),
+    collections: collectionState.collections,
+    collectionsError: collectionState.error,
     isFavorite,
     toggleFavorite,
+    createCollection,
+    updateFavorite,
   };
 }

@@ -40,7 +40,10 @@ function MemeApp() {
     apiQuery, setApiQuery, apiQueryResult, consoleRoute, consoleJson, copied,
     copyJson, submitSearch, chooseSearch, toggleProvider, runApi, clearLogs,
     favorites, favoritesError, isFavorite, toggleFavorite,
+    collections, collectionsError, createCollection, updateFavorite,
     editorItem, openEditor, closeEditor,
+    recentSearches, recentSearchError, clearRecentSearches,
+    resultsLayout, setResultsLayout,
   } = useAppController();
   const pageHeading = page === "explore"
     ? "Explore"
@@ -107,6 +110,18 @@ function MemeApp() {
                     Search <span>↗</span>
                   </button>
                 </form>
+                {recentSearches.length > 0 && (
+                  <div className="recent-searches" aria-label="Recent searches">
+                    <span>RECENT</span>
+                    {recentSearches.map((term) => (
+                      <button key={term} type="button" onClick={() => chooseSearch(term)}>{term}</button>
+                    ))}
+                    <button className="clear-recent-searches" type="button" onClick={clearRecentSearches}>
+                      Clear
+                    </button>
+                  </div>
+                )}
+                {recentSearchError && <p className="recent-search-error" role="status">{recentSearchError}</p>}
                 <ProviderFilters providers={providers} onToggle={toggleProvider} />
               </>
             )}
@@ -149,6 +164,10 @@ function MemeApp() {
           ) : page === "favorites" ? (
             <FavoritesSection
               favorites={favorites}
+              collections={collections}
+              collectionsError={collectionsError}
+              onCreateCollection={createCollection}
+              onUpdateFavorite={updateFavorite}
               isFavorite={isFavorite}
               onToggleFavorite={toggleFavorite}
               onEdit={openEditor}
@@ -175,6 +194,26 @@ function MemeApp() {
                       : page === "explore" ? "Find your thing" : "Browse reactions"}
                   </h2>
                 </div>
+                {page === "home" && submittedQuery && (
+                  <div className="results-layout-toggle" role="group" aria-label="Results layout">
+                    <button
+                      type="button"
+                      className={resultsLayout === "providers" ? "active" : ""}
+                      aria-pressed={resultsLayout === "providers"}
+                      onClick={() => setResultsLayout("providers")}
+                    >
+                      By provider
+                    </button>
+                    <button
+                      type="button"
+                      className={resultsLayout === "unified" ? "active" : ""}
+                      aria-pressed={resultsLayout === "unified"}
+                      onClick={() => setResultsLayout("unified")}
+                    >
+                      All results
+                    </button>
+                  </div>
+                )}
                 {(page === "home" || page === "explore") && (
                   <MediaSwitch kind={kind} setKind={setKind} />
                 )}
@@ -214,6 +253,7 @@ function MemeApp() {
                   providers={providers}
                   results={visibleResults}
                   loading={mediaQuery.isPending || mediaQuery.isFetching}
+                  layout={resultsLayout}
                   isFavorite={isFavorite}
                   onToggleFavorite={toggleFavorite}
                   onEdit={openEditor}

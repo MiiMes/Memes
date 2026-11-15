@@ -1,6 +1,8 @@
 const FAVORITES_STORAGE_KEY = "memes:favorites:v1";
+const COLLECTIONS_STORAGE_KEY = "memes:favorite-collections:v1";
 const GENERATED_GIFS_DB = "memes:generated-favorites";
 const GENERATED_GIFS_STORE = "gifs";
+const MEME_DRAFTS_STORE = "drafts";
 
 function normalizeFavorite(item) {
   if (
@@ -25,6 +27,12 @@ function normalizeFavorite(item) {
     ...(typeof item.generatedGifId === "string" && item.generatedGifId
       ? { generatedGifId: item.generatedGifId, mimeType: "image/gif" }
       : {}),
+    collectionIds: Array.isArray(item.collectionIds)
+      ? item.collectionIds.filter((id) => typeof id === "string")
+      : [],
+    tags: Array.isArray(item.tags)
+      ? item.tags.filter((tag) => typeof tag === "string")
+      : [],
     kind: "gif",
   };
 }
@@ -44,10 +52,13 @@ function openGeneratedGifsDatabase() {
   }
 
   return new Promise((resolve, reject) => {
-    const request = globalThis.indexedDB.open(GENERATED_GIFS_DB, 1);
+    const request = globalThis.indexedDB.open(GENERATED_GIFS_DB, 2);
     request.onupgradeneeded = () => {
       if (!request.result.objectStoreNames.contains(GENERATED_GIFS_STORE)) {
         request.result.createObjectStore(GENERATED_GIFS_STORE);
+      }
+      if (!request.result.objectStoreNames.contains(MEME_DRAFTS_STORE)) {
+        request.result.createObjectStore(MEME_DRAFTS_STORE);
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -56,7 +67,7 @@ function openGeneratedGifsDatabase() {
   });
 }
 
-function runGeneratedGifRequest(mode, createRequest) {
+function runGeneratedGifRequest(mode, createRequest, storeName = GENERATED_GIFS_STORE) {
   return openGeneratedGifsDatabase().then((database) => new Promise((resolve, reject) => {
     let result;
     let settled = false;
@@ -69,8 +80,8 @@ function runGeneratedGifRequest(mode, createRequest) {
 
     let transaction;
     try {
-      transaction = database.transaction(GENERATED_GIFS_STORE, mode);
-      const request = createRequest(transaction.objectStore(GENERATED_GIFS_STORE));
+      transaction = database.transaction(storeName, mode);
+      const request = createRequest(transaction.objectStore(storeName));
       request.onsuccess = () => {
         result = request.result;
       };
@@ -102,6 +113,33 @@ export function readGeneratedGif(id) {
 
 export function deleteGeneratedGif(id) {
   return runGeneratedGifRequest("readwrite", (store) => store.delete(id));
+}
+
+export function saveMemeDraft(draft) {
+  if (!draft?.id || !(draft.sourceBlob instanceof Blob)) {
+    return Promise.reject(new Error("A draft with its source image is required."));
+  }
+  return runGeneratedGifRequest(
+    "readwrite",
+    (store) => store.put(draft, draft.id),
+    MEME_DRAFTS_STORE,
+  );
+}
+
+export function readMemeDrafts() {
+  return runGeneratedGifRequest(
+    "readonly",
+    (store) => store.getAll(),
+    MEME_DRAFTS_STORE,
+  );
+}
+
+export function deleteMemeDraft(id) {
+  return runGeneratedGifRequest(
+    "readwrite",
+    (store) => store.delete(id),
+    MEME_DRAFTS_STORE,
+  );
 }
 
 export function readFavorites() {
@@ -144,4 +182,56 @@ export function toggleStoredFavorite(favorites, item) {
 
 export function isFavoriteItem(favorites, item) {
   return favorites.some((favorite) => favoriteKey(favorite) === favoriteKey(item));
+}
+
+export function readFavoriteCollections() {
+  try {
+    const stored = globalThis.localStorage.getItem(COLLECTIONS_STORAGE_KEY);
+    if (!stored) return { collections: [], error: "" };
+    const parsed = JSON.parse(stored);
+    if (!Array.isArray(parsed)) throw new Error("Saved collections data is invalid.");
+    return {
+      collections: parsed.filter((collection) =>
+        collection && typeof collection.id === "string" && typeof collection.name === "string",
+      ),
+      error: "",
+    };
+  } catch (error) {
+    return { collections: [], error: `Collections could not be loaded.${error instanceof Error ? ` ${error.message}` : ""}` };
+  }
+}
+
+export function saveFavoriteCollection(collections, name) {
+  const normalizedName = name.trim();
+  if (!normalizedName) throw new Error("Enter a name for the collection.");
+  if (collections.some((collection) =>
+    collection.name.toLocaleLowerCase() === normalizedName.toLocaleLowerCase(),
+  )) {
+    throw new Error("A collection with that name already exists.");
+  }
+
+  const uniqueId = globalThis.crypto?.randomUUID?.() ??
+    `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const nextCollections = [{ id: `collection-${uniqueId}`, name: normalizedName }, ...collections];
+  try {
+    globalThis.localStorage.setItem(COLLECTIONS_STORAGE_KEY, JSON.stringify(nextCollections));
+    return nextCollections;
+  } catch (error) {
+    throw new Error(`Collection could not be saved.${error instanceof Error ? ` ${error.message}` : ""}`);
+  }
+}
+
+export function updateStoredFavorite(favorites, item, details) {
+  const key = favoriteKey(item);
+  const nextFavorites = favorites.map((favorite) =>
+    favoriteKey(favorite) === key
+      ? normalizeFavorite({ ...favorite, ...details })
+      : favorite,
+  );
+  try {
+    globalThis.localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(nextFavorites));
+    return { favorites: nextFavorites, error: "" };
+  } catch (error) {
+    return { favorites, error: errorMessage("saved", error) };
+  }
 }
