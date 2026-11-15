@@ -65,70 +65,55 @@ function escapeHtml(value) {
   })[character]);
 }
 
-function tryLegacyImageCopy(mediaUrl, title, logger) {
-  const document = globalThis.document;
-  if (!document?.body || typeof document.execCommand !== "function") {
+function tryLegacyImageCopy(imageElement, logger) {
+  const document = imageElement?.ownerDocument;
+  if (!imageElement?.isConnected || !document || typeof document.execCommand !== "function") {
     logger.log("Legacy selected-image copy unavailable", {
-      hasDocument: Boolean(document),
+      hasConnectedImage: Boolean(imageElement?.isConnected),
       hasExecCommand: typeof document?.execCommand === "function",
     });
     return false;
   }
 
-  let host;
-  let selection;
+  const selection = document.getSelection?.();
+  if (!selection) {
+    logger.log("Legacy selected-image copy unavailable", { hasSelection: false });
+    return false;
+  }
+
   const previousRanges = [];
-  let previousFocus;
+  for (let index = 0; index < selection.rangeCount; index += 1) {
+    previousRanges.push(selection.getRangeAt(index).cloneRange());
+  }
   let copied = false;
 
   try {
-    host = document.createElement("div");
-    host.contentEditable = "true";
-    host.setAttribute("aria-hidden", "true");
-    host.style.cssText = "position:fixed;left:-10000px;top:0;width:1px;height:1px;overflow:hidden;";
-    const image = document.createElement("img");
-    image.src = mediaUrl;
-    image.alt = title || "GIF";
-    host.append(image);
-    document.body.append(host);
-
-    selection = globalThis.getSelection?.();
-    if (selection) {
-      for (let index = 0; index < selection.rangeCount; index += 1) {
-        previousRanges.push(selection.getRangeAt(index).cloneRange());
-      }
-    }
-    previousFocus = document.activeElement;
-
-    host.focus({ preventScroll: true });
     const range = document.createRange();
-    range.selectNode(host.firstChild);
-    selection?.removeAllRanges();
-    selection?.addRange(range);
+    range.selectNode(imageElement);
+    selection.removeAllRanges();
+    selection.addRange(range);
     copied = document.execCommand("copy");
     logger.log("Legacy selected-image copy", {
       acceptedByBrowser: copied,
-      representation: "selected image markup; actual paste format is browser-dependent",
+      selectedImage: {
+        tagName: imageElement.tagName,
+        loaded: imageElement.complete && imageElement.naturalWidth > 0,
+        width: imageElement.naturalWidth,
+        height: imageElement.naturalHeight,
+      },
+      note: "The browser does not expose the resulting native clipboard formats to this page.",
     });
   } catch (error) {
     logger.log("Legacy selected-image copy failed", errorDetails(error));
   } finally {
-    selection?.removeAllRanges();
-    for (const range of previousRanges) selection?.addRange(range);
-    host?.remove();
-    if (previousFocus?.isConnected && typeof previousFocus.focus === "function") {
-      try {
-        previousFocus.focus({ preventScroll: true });
-      } catch {
-        previousFocus.focus();
-      }
-    }
+    selection.removeAllRanges();
+    for (const range of previousRanges) selection.addRange(range);
   }
 
   return copied;
 }
 
-export async function copyMediaToClipboard(item) {
+export async function copyMediaToClipboard(item, imageElement) {
   const mediaUrl = item.imageUrl;
   if (!mediaUrl) throw new Error("This result has no media URL to copy.");
 
@@ -192,7 +177,7 @@ export async function copyMediaToClipboard(item) {
     richText: { format: "text/html", supported: supports("text/html") },
   });
 
-  const legacyCopyAccepted = tryLegacyImageCopy(mediaUrl, item.title, logger);
+  const legacyCopyAccepted = tryLegacyImageCopy(imageElement, logger);
   const writeCandidate = async (label, formats, result) => {
     try {
       const clipboardItem = new ClipboardItemConstructor(formats);
@@ -210,6 +195,19 @@ export async function copyMediaToClipboard(item) {
   };
 
   try {
+    if (legacyCopyAccepted) {
+      const nativeResult = await writeCandidate(
+        `Native ${mimeType} Blob write`,
+        { [mimeType]: imageBlob },
+        { method: "native", mimeType },
+      );
+      if (nativeResult) return nativeResult;
+      logger.log("Preserving selected-image clipboard result", {
+        reason: "The legacy copy command accepted the actual rendered image; HTML fallbacks are skipped.",
+      });
+      return { method: "legacy-image", mimeType };
+    }
+
     const dataUrl = imageBlob.then(blobToDataUrl);
     const htmlBlob = dataUrl.then((value) => new Blob([
       `<img src="${value}" alt="${escapeHtml(item.title || "GIF")}">`,
@@ -252,13 +250,6 @@ export async function copyMediaToClipboard(item) {
       { method: "rich-html", mimeType },
     );
     if (richTextResult) return richTextResult;
-
-    if (legacyCopyAccepted) {
-      logger.log("Using legacy selected-image copy", {
-        warning: "This may copy image markup rather than GIF bytes.",
-      });
-      return { method: "legacy-html", mimeType };
-    }
 
     if (fetchError) {
       throw new Error(

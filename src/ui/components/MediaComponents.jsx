@@ -79,21 +79,26 @@ export function MediaCard({
     }
   }
 
-  async function copyResult() {
+  async function copyResult(imageElement) {
     showCopyFeedback({ tone: "pending", message: "Copying…" });
     try {
-      const copyFormat = await copyMediaToClipboard(item);
+      const copyFormat = await copyMediaToClipboard(item, imageElement);
       const mediaName = item.kind === "sticker" ? "Sticker" : "GIF";
       const copyMessages = {
         "multi-format": `${mediaName} copied in multiple formats; paste to verify.`,
         native: `${mediaName} bytes copied (${copyFormat.mimeType}); paste to verify.`,
-        "rich-html-custom": `${mediaName} copied as rich HTML and a browser format; paste support varies.`,
-        "web-custom": `${mediaName} copied in a browser-specific format; other apps may ignore it.`,
-        "rich-html": `${mediaName} copied as rich HTML; paste support varies.`,
-        "legacy-html": "Legacy image markup copied; GIF paste is unverified.",
+        "rich-html-custom": `${mediaName} HTML/custom data was accepted; Discord paste is unverified.`,
+        "web-custom": `${mediaName} browser-specific data was accepted; Discord may ignore it.`,
+        "rich-html": "Browser accepted HTML only; this does not confirm a GIF was copied.",
+        "legacy-image": "Browser accepted copying the displayed image selection; paste to verify.",
       };
+      const browserOnlyFormat = [
+        "rich-html-custom",
+        "web-custom",
+        "rich-html",
+      ].includes(copyFormat.method);
       showCopyFeedback({
-        tone: "success",
+        tone: browserOnlyFormat ? "error" : "success",
         message: copyMessages[copyFormat.method] ?? `${mediaName} copy accepted by the browser.`,
       });
     } catch (cause) {
@@ -102,9 +107,9 @@ export function MediaCard({
     }
   }
 
-  function handleClick() {
+  function handleClick(event) {
     if (copyOnClick) {
-      void copyResult();
+      void copyResult(event.currentTarget.querySelector("img"));
     } else if (item.video) {
       playWithSound();
     } else {
