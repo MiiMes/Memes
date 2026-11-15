@@ -85,6 +85,7 @@ export function MediaCard({
       const copyFormat = await copyMediaToClipboard(item);
       const mediaName = item.kind === "sticker" ? "Sticker" : "GIF";
       const copyMessages = {
+        apng: "Animated PNG copied as image/png; paste into Discord to check whether animation is preserved.",
         native: `${mediaName} bytes copied (${copyFormat.mimeType}); paste to verify.`,
         "web-custom": `${mediaName} browser-specific data was accepted; Discord may ignore it.`,
       };
