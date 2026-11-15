@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { copyAnimatedGifToClipboard } from "../services/clipboard.js";
-import { createCaptionedGif } from "../services/memeEditor.js";
+import { createCaptionedGif, drawCaption } from "../services/memeEditor.js";
 
 function createGeneratedFavoriteId() {
   const uniqueId = globalThis.crypto?.randomUUID?.() ??
@@ -28,11 +28,58 @@ export function MemeEditor({
   const [generatedFavoriteItem, setGeneratedFavoriteItem] = useState(null);
   const [isSavingFavorite, setIsSavingFavorite] = useState(false);
   const [favoriteActionError, setFavoriteActionError] = useState("");
+  const previewRef = useRef(null);
+  const previewImageRef = useRef(null);
+  const captionCanvasRef = useRef(null);
 
   useEffect(() => {
     if (!outputUrl) return undefined;
     return () => URL.revokeObjectURL(outputUrl);
   }, [outputUrl]);
+
+  useEffect(() => {
+    if (outputUrl) return undefined;
+
+    function renderCaptionPreview() {
+      const preview = previewRef.current;
+      const image = previewImageRef.current;
+      const canvas = captionCanvasRef.current;
+      if (!preview || !image?.naturalWidth || !image.naturalHeight || !canvas) return;
+
+      const previewBounds = preview.getBoundingClientRect();
+      const imageBounds = image.getBoundingClientRect();
+      const pixelRatio = globalThis.devicePixelRatio || 1;
+      canvas.width = Math.max(1, Math.round(imageBounds.width * pixelRatio));
+      canvas.height = Math.max(1, Math.round(imageBounds.height * pixelRatio));
+      canvas.style.left = `${imageBounds.left - previewBounds.left}px`;
+      canvas.style.top = `${imageBounds.top - previewBounds.top}px`;
+      canvas.style.width = `${imageBounds.width}px`;
+      canvas.style.height = `${imageBounds.height}px`;
+
+      const context = canvas.getContext("2d");
+      if (!context) return;
+      context.scale(canvas.width / image.naturalWidth, canvas.height / image.naturalHeight);
+      drawCaption(context, topText, "top", image.naturalWidth, image.naturalHeight, fontSizePercent);
+      drawCaption(context, bottomText, "bottom", image.naturalWidth, image.naturalHeight, fontSizePercent);
+    }
+
+    const image = previewImageRef.current;
+    image?.addEventListener("load", renderCaptionPreview);
+    renderCaptionPreview();
+
+    const observer = typeof globalThis.ResizeObserver === "function"
+      ? new globalThis.ResizeObserver(renderCaptionPreview)
+      : null;
+    if (previewRef.current) observer?.observe(previewRef.current);
+    if (image) observer?.observe(image);
+    if (!observer) globalThis.addEventListener("resize", renderCaptionPreview);
+
+    return () => {
+      image?.removeEventListener("load", renderCaptionPreview);
+      observer?.disconnect();
+      if (!observer) globalThis.removeEventListener("resize", renderCaptionPreview);
+    };
+  }, [bottomText, fontSizePercent, item?.imageUrl, outputUrl, topText]);
 
   function updateCaption(setter, value) {
     setter(value);
@@ -126,17 +173,13 @@ export function MemeEditor({
     <section className="meme-editor" aria-label="Meme editor">
       <div className="meme-editor-workspace">
         <button className="meme-editor-back" type="button" onClick={onClose}>← Back</button>
-        <div className="meme-editor-preview">
+        <div className="meme-editor-preview" ref={previewRef}>
           <img
+            ref={previewImageRef}
             src={outputUrl || item.imageUrl}
             alt={item.title || "GIF meme preview"}
           />
-          {!outputUrl && (
-            <div className="meme-editor-caption-preview" aria-hidden="true">
-              {topText && <span className="caption-top">{topText}</span>}
-              {bottomText && <span className="caption-bottom">{bottomText}</span>}
-            </div>
-          )}
+          {!outputUrl && <canvas ref={captionCanvasRef} className="meme-editor-caption-canvas" aria-hidden="true" />}
         </div>
         <p className="meme-editor-preview-note">
           {outputUrl ? "Previewing your animated GIF." : "Caption preview updates as you type."}

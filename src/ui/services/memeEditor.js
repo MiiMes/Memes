@@ -8,7 +8,7 @@ const MAX_GIF_FRAMES = 120;
 const MAX_GIF_PIXELS = 1_500_000;
 const MAX_TOTAL_FRAME_PIXELS = 30_000_000;
 
-function drawCaption(context, text, position, width, height, fontSizePercent) {
+export function drawCaption(context, text, position, width, height, fontSizePercent) {
   const normalizedText = text.trim().toUpperCase();
   if (!normalizedText) return;
 
