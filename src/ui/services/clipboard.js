@@ -7,18 +7,6 @@ function imageMimeType(url) {
   return "";
 }
 
-function blobDataUrl(blob, mimeType) {
-  return blob.arrayBuffer().then((buffer) => {
-    const bytes = new Uint8Array(buffer);
-    let binary = "";
-    const chunkSize = 0x8000;
-    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-      binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
-    }
-    return `data:${blob.type || mimeType};base64,${btoa(binary)}`;
-  });
-}
-
 export async function copyMediaToClipboard(item) {
   const mediaUrl = item.imageUrl;
   const clipboard = globalThis.navigator?.clipboard;
@@ -28,6 +16,7 @@ export async function copyMediaToClipboard(item) {
   }
 
   const mimeType = imageMimeType(mediaUrl);
+  if (!mimeType) throw new Error("This result does not have a recognizable image format.");
   const ClipboardItemConstructor = globalThis.ClipboardItem;
   if (typeof ClipboardItemConstructor !== "function") {
     throw new Error("This browser cannot copy media to the clipboard.");
@@ -40,32 +29,37 @@ export async function copyMediaToClipboard(item) {
     if (blobType && mimeType && blobType !== mimeType) {
       throw new Error(`Expected ${mimeType} but received ${blobType}.`);
     }
-    if (!blobType?.startsWith("image/") && !mimeType) {
+    if (!blobType?.startsWith("image/")) {
       throw new Error("The result URL did not return a recognizable image.");
     }
     return blob;
   });
 
-  const htmlImage = imageBlob.then(async (blob) => {
-    const dataUrl = await blobDataUrl(blob, mimeType);
-    return new Blob([`<img src="${dataUrl}" alt="GIF">`], { type: "text/html" });
-  });
-  const representations = { "text/html": htmlImage };
-  const actualMimeTypeSupported =
-    mimeType &&
-    typeof ClipboardItemConstructor.supports === "function" &&
-    ClipboardItemConstructor.supports(mimeType);
-
-  if (actualMimeTypeSupported) representations[mimeType] = imageBlob;
-
   try {
-    await clipboard.write([new ClipboardItemConstructor(representations)]);
-  } catch {
-    if (!actualMimeTypeSupported) throw new Error("The GIF could not be written to the clipboard.");
-    await clipboard.write([
-      new ClipboardItemConstructor({ "text/html": htmlImage }),
-    ]);
-  }
+    await clipboard.write([new ClipboardItemConstructor({ [mimeType]: imageBlob })]);
+    return "native";
+  } catch (nativeError) {
+    const customMimeType = `web ${mimeType}`;
+    const supportsCustomFormat =
+      typeof ClipboardItemConstructor.supports === "function" &&
+      ClipboardItemConstructor.supports(customMimeType);
+    if (!supportsCustomFormat) {
+      throw new Error(
+        "This browser cannot place animated GIF data on the system clipboard. A native clipboard integration is required.",
+        { cause: nativeError },
+      );
+    }
 
-  return "media";
+    try {
+      await clipboard.write([
+        new ClipboardItemConstructor({ [customMimeType]: imageBlob }),
+      ]);
+      return "web-custom";
+    } catch (customError) {
+      throw new AggregateError(
+        [nativeError, customError],
+        "This browser could not copy the GIF in a format the clipboard accepts.",
+      );
+    }
+  }
 }
