@@ -143,6 +143,7 @@ export function ExploreCategoryCard({ category, kind, locale, logRequest, onSele
         kind,
       }}
       onSelect={onSelect}
+      copyOnClick={Boolean(imageUrl)}
       overlayAlwaysVisible
       onImageError={() => {
         if (hasCategoryPreview) setCategoryPreviewFailed(true);
