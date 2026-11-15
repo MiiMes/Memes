@@ -565,6 +565,45 @@ function logReactionResults(results, providers, locale) {
   console.groupEnd();
 }
 
+function logExploreResults(results, providers, locale, kind) {
+  const categoriesByProvider = Object.fromEntries(
+    providers.map((provider) => [
+      provider,
+      (results[provider]?.items ?? []).map((item) => item.query || item.title).filter(Boolean),
+    ]),
+  );
+  const categoriesByTerm = new Map();
+
+  for (const [provider, terms] of Object.entries(categoriesByProvider)) {
+    for (const term of terms) {
+      const key = reactionKey(term);
+      const existing = categoriesByTerm.get(key);
+      if (existing) {
+        if (!existing.providers.includes(provider)) existing.providers.push(provider);
+      } else {
+        categoriesByTerm.set(key, { term, providers: [provider] });
+      }
+    }
+  }
+
+  const overlap = [...categoriesByTerm.values()].filter((entry) => entry.providers.length > 1);
+  console.groupCollapsed(`🧭 Explore categories · ${kind} · ${locale}`);
+  for (const provider of providers) {
+    const result = results[provider] ?? { items: [] };
+    const terms = categoriesByProvider[provider];
+    const icon = provider === "giphy" ? "🟣" : provider === "tenor" ? "🔵" : "🟠";
+    console.log(`${icon} ${PROVIDER_NAMES[provider]} · ${terms.length} results`, terms);
+    if (result.error) console.warn(`⚠️ ${PROVIDER_NAMES[provider]} request failed: ${result.error}`);
+  }
+  console.log(
+    `🤝 Overlap · ${overlap.length} categories`,
+    overlap.map(({ term, providers: sources }) =>
+      `${term} (${sources.map((provider) => PROVIDER_NAMES[provider]).join(" + ")})`,
+    ),
+  );
+  console.groupEnd();
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -627,11 +666,14 @@ function MemeApp() {
         locale,
         logRequest,
       });
-      if (page === "reactions") logReactionResults(results, providers, locale);
-      if (!useStaticTenorCategories) return results;
+      if (!useStaticTenorCategories) {
+        if (page === "reactions") logReactionResults(results, providers, locale);
+        if (page === "explore") logExploreResults(results, providers, locale, kind);
+        return results;
+      }
       const tenorCategories = results.tenor?.items ?? [];
       const categoryKey = (value) => String(value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
-      return {
+      const exploreResults = {
         ...results,
         tenor: {
           ...results.tenor,
@@ -651,6 +693,8 @@ function MemeApp() {
           }),
         },
       };
+      logExploreResults(exploreResults, providers, locale, kind);
+      return exploreResults;
     },
     enabled: page === "explore" || page === "reactions",
   });
@@ -899,6 +943,7 @@ function MemeApp() {
                   loading={categoriesQuery.isPending}
                   onSelect={chooseSearch}
                   categoryView
+                  kind={kind}
                   locale={locale}
                   logRequest={logRequest}
                 />
@@ -1095,9 +1140,23 @@ function ProviderSections({
   loading,
   onSelect,
   categoryView = false,
+  kind,
   locale,
   logRequest,
 }) {
+  if (categoryView) {
+    return (
+      <ExploreSections
+        providers={providers}
+        results={results}
+        loading={loading}
+        kind={kind}
+        locale={locale}
+        logRequest={logRequest}
+        onSelect={onSelect}
+      />
+    );
+  }
   if (loading) {
     return <div className="loading-state"><span className="loader" /> Contacting selected providers...</div>;
   }
@@ -1105,7 +1164,7 @@ function ProviderSections({
     return <div className="empty-state">Choose at least one provider above to get started.</div>;
   }
   return (
-    <div className={`provider-sections ${categoryView ? "categories-view" : ""}`}>
+    <div className="provider-sections">
       {providers.map((provider) => {
         const result = results[provider];
         const items = result?.items ?? [];
@@ -1122,26 +1181,15 @@ function ProviderSections({
             {items.length ? (
               <div className="mosaic-grid">
                 {items.map((item, index) => (
-                  categoryView && provider === "tenor" ? (
-                    <TenorExploreCategoryCard
-                      item={item}
-                      key={`${provider}-${item.id}-${index}`}
-                      locale={locale}
-                      logRequest={logRequest}
-                      onSelect={() => onSelect?.(item.query)}
-                    />
-                  ) : (
-                    <MediaCard
-                      item={item}
-                      key={`${provider}-${item.id}-${index}`}
-                      onSelect={categoryView ? () => onSelect?.(item.query) : undefined}
-                    />
-                  )
+                  <MediaCard
+                    item={item}
+                    key={`${provider}-${item.id}-${index}`}
+                  />
                 ))}
               </div>
             ) : !result?.error ? (
               <div className="provider-empty">
-                {categoryView ? "No categories returned for this media type." : "No results yet. Try another search or provider."}
+                No results yet. Try another search or provider.
               </div>
             ) : null}
           </section>
@@ -1151,7 +1199,80 @@ function ProviderSections({
   );
 }
 
-function TenorExploreCategoryCard({ item, locale, logRequest, onSelect }) {
+function ExploreSections({ providers, results, loading, kind, locale, logRequest, onSelect }) {
+  if (loading) {
+    return <div className="loading-state"><span className="loader" /> Contacting selected providers...</div>;
+  }
+  if (!providers.length) {
+    return <div className="empty-state">Choose at least one provider above to explore categories.</div>;
+  }
+
+  const categoriesByQuery = new Map();
+  for (const provider of providers) {
+    for (const item of results[provider]?.items ?? []) {
+      const query = String(item.query ?? item.title ?? "").trim();
+      const key = reactionKey(query);
+      if (!key) continue;
+
+      const existing = categoriesByQuery.get(key);
+      if (existing) {
+        if (!existing.providers.includes(provider)) existing.providers.push(provider);
+        existing.sources.push({ provider, item });
+      } else {
+        categoriesByQuery.set(key, {
+          key,
+          title: item.title || query,
+          query: query || item.title,
+          providers: [provider],
+          sources: [{ provider, item }],
+        });
+      }
+    }
+  }
+
+  const categories = [...categoriesByQuery.values()];
+  const errors = providers.flatMap((provider) =>
+    results[provider]?.error ? [{ provider, error: results[provider].error }] : [],
+  );
+
+  return (
+    <div className="explore-results">
+      <header className="explore-results-heading">
+        <h3>All categories</h3>
+        <span>{categories.length} unique categories</span>
+      </header>
+      {errors.map(({ provider, error }) => (
+        <div className="provider-error" key={provider} role="status">
+          {PROVIDER_NAMES[provider]} categories unavailable: {error}
+        </div>
+      ))}
+      {categories.length ? (
+        <div className="mosaic-grid">
+          {categories.map((category) => (
+            <ExploreCategoryCard
+              key={category.key}
+              category={category}
+              kind={kind}
+              locale={locale}
+              logRequest={logRequest}
+              onSelect={() => onSelect?.(category.query)}
+            />
+          ))}
+        </div>
+      ) : !errors.length ? (
+        <div className="provider-empty">No categories returned for this media type.</div>
+      ) : null}
+    </div>
+  );
+}
+
+function providerCanSearch(provider, kind) {
+  if (provider === "tenor") return kind === "gif";
+  if (provider === "giphy") return kind !== "clip";
+  return true;
+}
+
+function ExploreCategoryCard({ category, kind, locale, logRequest, onSelect }) {
   const tileRef = useRef(null);
   const [isVisible, setIsVisible] = useState(false);
   const [categoryPreviewFailed, setCategoryPreviewFailed] = useState(false);
@@ -1178,32 +1299,43 @@ function TenorExploreCategoryCard({ item, locale, logRequest, onSelect }) {
     return () => observer.disconnect();
   }, []);
 
-  const hasCategoryPreview = Boolean(item.imageUrl) && !categoryPreviewFailed;
+  const categoryPreview =
+    category.sources.map(({ item }) => item.imageUrl).find(Boolean) ?? "";
+  const hasCategoryPreview = Boolean(categoryPreview) && !categoryPreviewFailed;
+  const previewProvider = category.providers.find((provider) => providerCanSearch(provider, kind));
   const previewQuery = useQuery({
-    queryKey: ["tenor-explore-preview", item.query, locale],
-    queryFn: () => requestProvider(
-      "tenor",
-      "search",
-      { q: item.query, kind: "gif", locale, limit: 1 },
-      logRequest,
-    ),
+    queryKey: ["explore-category-preview", previewProvider, category.query, kind, locale],
+    queryFn: () => requestProvider(previewProvider, "search", {
+      q: category.query,
+      kind,
+      locale,
+      limit: 1,
+    }, logRequest),
     enabled:
       isVisible &&
       !hasCategoryPreview &&
       !searchPreviewFailed &&
-      providerIsConfigured("tenor"),
+      Boolean(previewProvider) &&
+      providerIsConfigured(previewProvider),
     staleTime: 24 * 60 * 60 * 1000,
     gcTime: 24 * 60 * 60 * 1000,
   });
   const searchPreview = previewQuery.data?.items?.[0]?.imageUrl ?? "";
   const imageUrl = hasCategoryPreview
-    ? item.imageUrl
+    ? categoryPreview
     : searchPreviewFailed ? "" : searchPreview;
 
   return (
     <MediaCard
       cardRef={tileRef}
-      item={{ ...item, imageUrl }}
+      item={{
+        id: category.key,
+        title: category.title,
+        imageUrl,
+        provider: category.providers[0],
+        providers: category.providers,
+        kind,
+      }}
       onSelect={onSelect}
       overlayAlwaysVisible
       onImageError={() => {
@@ -1442,7 +1574,10 @@ function MediaCard({ item, onSelect, onImageError, cardRef, overlayAlwaysVisible
         <span className="media-overlay">
           <span>{item.title}</span>
           {audioBlocked && <span>Click to enable sound</span>}
-          <span className={`attribution ${item.provider}`}>{PROVIDER_NAMES[item.provider]}</span>
+          <span className={`attribution ${item.provider}`}>
+            {item.providers?.map((provider) => PROVIDER_NAMES[provider]).join(" + ") ??
+              PROVIDER_NAMES[item.provider]}
+          </span>
         </span>
       </button>
     </article>
