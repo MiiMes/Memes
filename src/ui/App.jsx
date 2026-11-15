@@ -295,8 +295,17 @@ function normalizeKlipy(item, kind) {
 
 function mediaItems(provider, action, payload, kind) {
   if (action === "trending-searches") {
-    const terms = provider === "giphy" ? payload.data : payload.results;
-    return (terms ?? []).map((term) => ({ title: String(term), query: String(term) }));
+    const terms = provider === "giphy"
+      ? payload.data
+      : provider === "tenor"
+        ? payload.tags
+        : payload.results;
+    return (terms ?? []).map((term) => {
+      const query = String(
+        term.searchterm ?? term.name ?? term.slug ?? term,
+      );
+      return { title: query, query };
+    });
   }
   if (action === "categories") {
     const entries = provider === "giphy" ? payload.data : provider === "tenor" ? payload.tags : payload.data?.categories;
@@ -372,7 +381,7 @@ function makeRequest(provider, action, options) {
     const path = {
       search: "/v2/search",
       trending: "/v2/featured",
-      "trending-searches": "/v2/trending_terms",
+      "trending-searches": "/v2/categories",
       categories: "/v2/categories",
     }[action];
     const url = new URL(`https://tenor.googleapis.com${path}`);
@@ -382,6 +391,7 @@ function makeRequest(provider, action, options) {
     if (locale.includes("_")) url.searchParams.set("country", locale.split("_")[1]);
     url.searchParams.set("limit", String(limit));
     url.searchParams.set("contentfilter", "medium");
+    if (action === "trending-searches") url.searchParams.set("type", "trending");
     if (action === "search") {
       url.searchParams.set("q", q);
       url.searchParams.set("media_filter", "tinygif,gif");
@@ -688,8 +698,8 @@ function MemeApp() {
                 </form>
                 <ProviderFilters providers={providers} onToggle={toggleProvider} />
                 {Object.values(visibleTrendingSearches).some((entry) => entry.items?.length) && (
-                  <div className="trending-searches">
-                    <span className="trending-label">TRENDING</span>
+                  <div className="trending-searches" role="group" aria-label="Trending searches">
+                    <span className="trending-label">TRENDING SEARCHES</span>
                     {Object.entries(visibleTrendingSearches).flatMap(([provider, result]) =>
                       (result.items ?? []).slice(0, 5).map((term, index) => (
                         <button
