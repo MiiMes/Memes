@@ -1,11 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { MEDIA_TYPES, PROVIDER_NAMES, PROVIDERS } from "../constants/appConstants.js";
 import { copyMediaToClipboard } from "../services/clipboard.js";
-import {
-  copyMediaAsHtml,
-  copyMediaLink,
-  shareMediaFile,
-} from "../services/mediaActions.js";
 
 export function MediaSwitch({ kind, setKind }) {
   return (
@@ -90,6 +85,7 @@ export function MediaCard({
       const copyFormat = await copyMediaToClipboard(item);
       const mediaName = item.kind === "sticker" ? "Sticker" : "GIF";
       const copyMessages = {
+        "rich-html": "GIF copied as rich HTML; the app may paste its preview or the plain-text link.",
         "static-png": "GIF animation could not be copied; its first frame was copied as a static PNG.",
         native: `${mediaName} bytes copied (${copyFormat.mimeType}); paste to verify.`,
         "web-custom": `${mediaName} browser-specific data was accepted; Discord may ignore it.`,
@@ -102,32 +98,6 @@ export function MediaCard({
       const message = cause instanceof Error ? cause.message : String(cause);
       showCopyFeedback({ tone: "error", message: `Copy failed: ${message}` });
     }
-  }
-
-  async function runMediaAction(action, pendingMessage, successMessage) {
-    showCopyFeedback({ tone: "pending", message: pendingMessage });
-    try {
-      await action(item);
-      showCopyFeedback({ tone: "success", message: successMessage });
-    } catch (cause) {
-      if (cause?.name === "AbortError") {
-        showCopyFeedback({ tone: "neutral", message: "Sharing cancelled." });
-        return;
-      }
-      const message = cause instanceof Error ? cause.message : String(cause);
-      showCopyFeedback({ tone: "error", message: `Action failed: ${message}` });
-    }
-  }
-
-  function handleImageDragStart(event) {
-    event.dataTransfer.effectAllowed = "copy";
-    globalThis.console?.info?.("Media drag started", {
-      formats: Array.from(event.dataTransfer.types),
-    });
-    showCopyFeedback({
-      tone: "neutral",
-      message: "Drop the image into another app to test animated transfer.",
-    });
   }
 
   function handleClick() {
@@ -162,8 +132,6 @@ export function MediaCard({
           src={item.imageUrl}
           alt={item.title}
           loading="lazy"
-          draggable
-          onDragStart={handleImageDragStart}
           onError={onImageError}
         />
       )
@@ -195,46 +163,6 @@ export function MediaCard({
           </span>
         </span>
       </button>
-      {item.imageUrl && !item.video && (
-        <details className="media-share-menu">
-          <summary aria-label="More ways to share this media">More</summary>
-          <div className="media-share-options">
-            <button
-              type="button"
-              disabled={copyFeedback?.tone === "pending"}
-              onClick={() => void runMediaAction(
-                shareMediaFile,
-                "Preparing file share…",
-                "GIF shared through the browser share sheet.",
-              )}
-            >
-              Share file
-            </button>
-            <button
-              type="button"
-              disabled={copyFeedback?.tone === "pending"}
-              onClick={() => void runMediaAction(
-                copyMediaAsHtml,
-                "Copying rich HTML…",
-                "Rich HTML copied; paste behavior depends on the target app.",
-              )}
-            >
-              Copy rich HTML
-            </button>
-            <button
-              type="button"
-              disabled={copyFeedback?.tone === "pending"}
-              onClick={() => void runMediaAction(
-                copyMediaLink,
-                "Copying GIF link…",
-                "GIF link copied; paste and send it to check for an animated preview.",
-              )}
-            >
-              Copy link
-            </button>
-          </div>
-        </details>
-      )}
     </article>
   );
 }

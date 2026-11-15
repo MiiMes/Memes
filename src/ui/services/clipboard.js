@@ -9,6 +9,16 @@ function imageMimeType(url) {
   return "";
 }
 
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[character]);
+}
+
 async function createStaticPng(gifBlob, logger) {
   const image = new globalThis.Image();
   const objectUrl = globalThis.URL.createObjectURL(gifBlob);
@@ -116,29 +126,35 @@ export async function copyMediaToClipboard(item) {
 
   const errors = [];
   let fetchError;
-  const imageBlob = fetch(mediaUrl)
-    .then(async (response) => {
-      if (!response.ok) throw new Error(`Media request returned HTTP ${response.status}.`);
-      const blob = await response.blob();
-      const blobType = blob.type?.split(";")[0].toLowerCase();
-      if (blobType && blobType !== mimeType) {
-        throw new Error(`Expected ${mimeType} but received ${blobType}.`);
-      }
-      if (!blobType?.startsWith("image/")) {
-        throw new Error("The result URL did not return a recognizable image.");
-      }
-      logger.log("Media fetched", {
-        byteLength: blob.size,
-        responseMimeType: blobType,
-      });
-      return blob;
-    })
-    .catch((error) => {
-      fetchError = error;
-      logger.log("Media fetch failed", errorDetails(error));
-      throw error;
-    });
-  imageBlob.catch(() => {});
+  let imageBlob;
+  const getImageBlob = () => {
+    if (!imageBlob) {
+      imageBlob = fetch(mediaUrl)
+        .then(async (response) => {
+          if (!response.ok) throw new Error(`Media request returned HTTP ${response.status}.`);
+          const blob = await response.blob();
+          const blobType = blob.type?.split(";")[0].toLowerCase();
+          if (blobType && blobType !== mimeType) {
+            throw new Error(`Expected ${mimeType} but received ${blobType}.`);
+          }
+          if (!blobType?.startsWith("image/")) {
+            throw new Error("The result URL did not return a recognizable image.");
+          }
+          logger.log("Media fetched", {
+            byteLength: blob.size,
+            responseMimeType: blobType,
+          });
+          return blob;
+        })
+        .catch((error) => {
+          fetchError = error;
+          logger.log("Media fetch failed", errorDetails(error));
+          throw error;
+        });
+      imageBlob.catch(() => {});
+    }
+    return imageBlob;
+  };
 
   const supports = (format) => {
     if (typeof ClipboardItemConstructor.supports !== "function") return "unknown";
@@ -153,10 +169,12 @@ export async function copyMediaToClipboard(item) {
   const customFormatSupport = supports(customMimeType);
   const nativeFormatSupport = supports(mimeType);
   const pngFormatSupport = supports("image/png");
+  const richHtmlSupport = supports("text/html");
   logger.log("Clipboard format support", {
     native: { format: mimeType, supported: nativeFormatSupport },
     custom: { format: customMimeType, supported: customFormatSupport },
     staticImageFallback: { format: "image/png", supported: pngFormatSupport },
+    richHtml: { format: "text/html", supported: richHtmlSupport },
   });
 
   const writeCandidate = async (label, formats, result) => {
@@ -176,9 +194,22 @@ export async function copyMediaToClipboard(item) {
   };
 
   try {
+    if (mimeType === "image/gif" && richHtmlSupport !== false) {
+      const html = `<img src="${escapeHtml(mediaUrl)}" alt="${escapeHtml(item.title || "GIF")}">`;
+      const richHtmlResult = await writeCandidate(
+        "GIF rich HTML clipboard write",
+        {
+          "text/html": new Blob([html], { type: "text/html" }),
+          "text/plain": new Blob([mediaUrl], { type: "text/plain" }),
+        },
+        { method: "rich-html", mimeType },
+      );
+      if (richHtmlResult) return richHtmlResult;
+    }
+
     const writeStaticPng = async () => {
       if (mimeType !== "image/gif" || pngFormatSupport === false) return null;
-      const pngBlob = imageBlob.then((blob) => createStaticPng(blob, logger));
+      const pngBlob = getImageBlob().then((blob) => createStaticPng(blob, logger));
       return writeCandidate(
         "Static PNG image/png write",
         { "image/png": pngBlob },
@@ -193,7 +224,7 @@ export async function copyMediaToClipboard(item) {
 
     const nativeResult = await writeCandidate(
       `Native ${mimeType} Blob write`,
-      { [mimeType]: imageBlob },
+      { [mimeType]: getImageBlob() },
       { method: "native", mimeType },
     );
     if (nativeResult) return nativeResult;
@@ -206,7 +237,7 @@ export async function copyMediaToClipboard(item) {
     if (customFormatSupport === true) {
       const customResult = await writeCandidate(
         `Browser custom ${customMimeType} write`,
-        { [customMimeType]: imageBlob },
+        { [customMimeType]: getImageBlob() },
         { method: "web-custom", mimeType },
       );
       if (customResult) return customResult;

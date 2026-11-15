@@ -109,17 +109,9 @@ h1, h2, h3, p { margin-top: 0; }
 .provider-section-heading h3 { margin: 0; font: 600 16px "Space Grotesk", sans-serif; }
 .provider-count { color: #929194; font-size: 11px; }
 .mosaic-grid { columns: 4 190px; column-gap: 13px; }
-.media-card { position: relative; break-inside: avoid; margin: 0 0 13px; border-radius: 9px; overflow: hidden; background: #e8e7e5; }
+.media-card { break-inside: avoid; margin: 0 0 13px; border-radius: 9px; overflow: hidden; background: #e8e7e5; }
 .media-button { position: relative; display: block; width: 100%; min-height: 120px; padding: 0; border: 0; background: #e8e7e5; }
 .media-button img, .media-button video { display: block; width: 100%; min-height: 120px; max-height: 390px; object-fit: cover; }
-.media-share-menu { position: absolute; z-index: 3; top: 8px; right: 8px; color: white; font-size: 10px; }
-.media-share-menu summary { list-style: none; cursor: pointer; border-radius: 999px; padding: 6px 9px; background: #151515e8; font-weight: 700; }
-.media-share-menu summary::-webkit-details-marker { display: none; }
-.media-share-menu summary:focus-visible, .media-share-options button:focus-visible { outline: 2px solid var(--coral); outline-offset: 2px; }
-.media-share-options { position: absolute; top: calc(100% + 4px); right: 0; display: grid; min-width: 130px; gap: 2px; padding: 4px; border: 1px solid #ffffff30; border-radius: 7px; background: #151515f2; box-shadow: 0 3px 12px #0005; }
-.media-share-options button { border: 0; border-radius: 4px; padding: 5px 8px; color: white; background: transparent; text-align: left; font-size: 10px; }
-.media-share-options button:hover:not(:disabled) { background: #ffffff20; }
-.media-share-options button:disabled { opacity: .5; cursor: default; }
 .media-placeholder { display: grid; min-height: 145px; place-items: center; padding: 18px; color: #39383a; background: linear-gradient(135deg, #f8d7ce, #e0d4f7 55%, #c9efda); font: 600 17px "Space Grotesk", sans-serif; text-align: center; }
 .media-overlay { position: absolute; inset: auto 0 0; display: flex; justify-content: space-between; align-items: end; gap: 8px; padding: 25px 10px 9px; color: white; text-align: left; font-size: 10px; opacity: 0; background: linear-gradient(transparent, #000a); transition: opacity .16s ease; }
 .media-button:hover .media-overlay, .media-button:focus-visible .media-overlay { opacity: 1; }
