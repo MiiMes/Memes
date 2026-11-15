@@ -257,9 +257,7 @@ export async function copyMediaToClipboard(item) {
 
   try {
     if (mimeType === "image/gif") {
-      const formats = {
-        "text/plain": new Blob([mediaUrl], { type: "text/plain" }),
-      };
+      const formats = {};
       if (richHtmlSupport !== false) {
         const html = `<img src="${escapeHtml(mediaUrl)}" alt="${escapeHtml(item.title || "GIF")}">`;
         formats["text/html"] = new Blob([html], { type: "text/html" });
@@ -271,7 +269,7 @@ export async function copyMediaToClipboard(item) {
         formats[customMimeType] = getImageBlob();
       }
 
-      if (Object.keys(formats).length > 1) {
+      if (Object.keys(formats).length > 0) {
         const multiFormatResult = await writeCandidate(
           "GIF multi-format clipboard write",
           formats,
@@ -287,24 +285,10 @@ export async function copyMediaToClipboard(item) {
         "GIF rich HTML clipboard write",
         {
           "text/html": new Blob([html], { type: "text/html" }),
-          "text/plain": new Blob([mediaUrl], { type: "text/plain" }),
         },
         { method: "rich-html", mimeType },
       );
       if (richHtmlResult) return richHtmlResult;
-    }
-
-    if (mimeType === "image/gif" && typeof clipboard.writeText === "function") {
-      try {
-        await clipboard.writeText(mediaUrl);
-        logger.log("GIF URL text fallback accepted by browser", {
-          note: "This copies a link, not GIF image data.",
-        });
-        return { method: "text-url", mimeType: "text/plain" };
-      } catch (error) {
-        errors.push(error);
-        logger.log("GIF URL text fallback rejected", errorDetails(error));
-      }
     }
 
     const writeStaticPng = async () => {
