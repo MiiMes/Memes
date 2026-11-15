@@ -179,13 +179,11 @@ function makeRequest(provider, action, options) {
     if (action === "search") url.searchParams.set("q", q);
     if (action === "search" || action === "trending") {
       url.searchParams.set("rating", "g");
-      const language = giphyLanguage(locale);
-      if (language) url.searchParams.set("lang", language);
       if (locale.includes("_")) url.searchParams.set("country_code", locale.split("_")[1]);
-    }
-    if (action === "categories") {
-      const language = giphyLanguage(locale);
-      if (language) url.searchParams.set("lang", language);
+      if (action === "search") {
+        const language = giphyLanguage(locale);
+        if (language) url.searchParams.set("lang", language);
+      }
     }
     return { url };
   }

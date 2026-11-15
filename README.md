@@ -41,9 +41,12 @@ the session.
 
 The language/region selector includes Tenor's documented search languages and
 common regional variants. Tenor receives both `locale` and `country`; KLIPY
-receives the combined locale. GIPHY receives its documented `lang` values and
-the selected country where supported; for languages outside GIPHY's supported
-list, the `lang` parameter is omitted rather than sending an unsupported code.
+receives the combined locale. GIPHY search requests receive a supported `lang`
+and `country_code`; trending media receives `country_code` only. GIPHY
+categories and trending-search terms have no documented locale filter, so
+those responses remain in the provider's default/global locale. For languages
+outside GIPHY's supported list, `lang` is omitted rather than sending an
+unsupported code.
 Tenor's GIF Explore section uses a static list of its top-level category names
 and loads matching GIF previews from Tenor's categories response or a lazy
 one-result search when a category thumbnail is missing; other Explore
