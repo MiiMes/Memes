@@ -28,11 +28,41 @@ const LOCALES = [
   ["pt_BR", "Português · Brasil"],
   ["ja_JP", "日本語 · 日本"],
 ];
-const REACTIONS = [
-  "happy", "sad", "angry", "facepalm", "laughing", "love", "confused",
-  "eye roll", "clapping", "celebrate", "awkward", "sorry", "good morning",
-  "thank you", "mind blown", "shrug",
-];
+const REACTIONS_BY_PROVIDER = {
+  tenor: [
+    "Good night", "Good morning", "Confused", "Chill out", "Love", "Happy",
+    "Cry", "Yes", "No", "LOL", "Excited", "Bye", "Sorry", "Congratulations",
+    "Sleepy", "Hello", "Hugs", "OK", "Please", "Thank you", "Miss you", "Wink",
+    "Whatever", "Hungry", "Dance", "Annoyed", "OMG", "Crazy", "Shrug", "Smile",
+    "Awkward", "EW", "Angry", "Surprised", "Why", "Thumbs up", "Wow", "Ouch",
+    "Oops", "You're welcome", "Lazy", "Stressed", "Embarrassed", "Clapping",
+    "Awesome", "JK", "Good luck", "High five", "Nervous", "Duh", "Aww", "Scared",
+    "Bored", "Sigh", "Kiss", "Sad",
+  ],
+  giphy: [
+    "Thank You", "Love", "Funny", "Yes", "Excited", "Kiss", "Hello", "Happy",
+    "Sad", "No", "Crying", "Waiting", "Congratulations", "Yay", "Hug", "What",
+    "Laughing", "Dancing", "Confused", "Wow", "Celebrate", "Shocked", "Thumbs Up",
+    "WTF", "Tired", "LOL", "Nope", "Bye", "Angry", "Welcome", "OK", "Cute",
+    "Miss You", "Sleepy", "Thinking", "Eye Roll", "Do It", "Side Eye", "Crazy",
+    "Fire", "Scared", "Huh",
+  ],
+  klipy: [
+    "Ok", "Win", "Laughing", "Confused", "Shocked", "Thank you", "Hug", "Awesome",
+    "Hearts", "Drunk", "Help", "Sleepy", "Wow", "Hello", "Sexy", "Excited", "Omg",
+    "Angry", "Wtf", "Mad", "Scared", "Sorry", "Whatever", "Good job", "Goodbye",
+    "Proud", "Ugh", "Oops", "Rage", "Flirt", "Frustrated", "Popcorn", "Success",
+    "Smh", "Disappointed", "Seriously", "Serious", "Shut up", "Burn", "Middle finger",
+    "Sigh", "Deal with it", "Sarcastic", "Yawn", "Hair flip", "Want", "Yolo",
+    "Thumbs down", "Meh", "Suspicious", "Mic drop", "Embarrassed", "Nom", "Good luck",
+    "You got this", "Disgusted", "Awww", "Fist bump", "Eww", "Applause", "Happy dance",
+    "Idk", "Do not want", "Amused", "Slow clap", "Oh snap", "Frown", "Pleased",
+    "Rejected", "Not bad", "Judging you", "I give up", "Cool story bro", "Aroused",
+    "Abandon thread", "Oh no you didnt", "Fml", "Interested", "What", "Bored", "Please",
+    "Nod", "Agree", "Party hard", "Finger guns", "Table flip", "Love", "Dancing",
+    "Smile", "Incredulous",
+  ],
+};
 const MEDIA_TYPES = [
   ["gif", "GIFs"],
   ["sticker", "Stickers"],
@@ -364,12 +394,13 @@ function MemeApp() {
     }),
     enabled: page === "home",
   });
+  const categoryKind = page === "reactions" ? "gif" : kind;
   const categoriesQuery = useQuery({
-    queryKey: ["categories", kind, locale, providers],
+    queryKey: ["categories", categoryKind, locale, providers],
     queryFn: () => requestProviders({
-      providers, action: "categories", kind, locale, logRequest,
+      providers, action: "categories", kind: categoryKind, locale, logRequest,
     }),
-    enabled: page === "explore",
+    enabled: page === "explore" || page === "reactions",
   });
   const apiQueryResult = useQuery({
     queryKey: ["api-console", apiRunId, apiAction, apiQuery, kind, locale, providers],
@@ -396,7 +427,8 @@ function MemeApp() {
     if (term) setSubmittedQuery(term);
   }
 
-  function chooseSearch(term) {
+  function chooseSearch(term, provider) {
+    if (provider) setProviders([provider]);
     setQuery(term);
     setSubmittedQuery(term);
     setPage("home");
@@ -444,7 +476,7 @@ function MemeApp() {
     }
   }
 
-  const pageHeading = page === "explore" ? "Explore" : page === "reactions" ? "Reactions" : "API console";
+  const pageHeading = page === "explore" ? "Explore" : page === "reactions" ? "Reaction GIFs" : "API console";
 
   return (
     <div className="app-shell">
@@ -548,7 +580,7 @@ function MemeApp() {
                   <h2>
                     {page === "home"
                       ? submittedQuery ? `Results for “${submittedQuery}”` : "Trending now"
-                      : page === "explore" ? "Find your thing" : "Pick a feeling"}
+                      : page === "explore" ? "Find your thing" : "Browse reactions"}
                   </h2>
                 </div>
                 {(page === "home" || page === "explore") && (
@@ -563,14 +595,15 @@ function MemeApp() {
                 />
               )}
               {page === "reactions" ? (
-                <div className="reaction-grid">
-                  {REACTIONS.map((reaction, index) => (
-                    <button className="reaction-card" key={reaction} onClick={() => chooseSearch(reaction)}>
-                      <span className={`reaction-emoji hue-${index % 6}`}>{["☺", "☹", "☹", "🙈", "◉", "♥"][index % 6]}</span>
-                      <span>{reaction}</span><span className="card-arrow">↗</span>
-                    </button>
-                  ))}
-                </div>
+                <ReactionSections
+                  providers={providers}
+                  results={visibleCategories}
+                  loading={categoriesQuery.isPending}
+                  onSelect={(term, provider) => {
+                    setKind("gif");
+                    chooseSearch(term, provider);
+                  }}
+                />
               ) : page === "explore" ? (
                 <ProviderSections
                   providers={providers}
@@ -669,6 +702,76 @@ function ProviderSections({ providers, results, loading, onSelect, categoryView 
                 {categoryView ? "No categories returned for this media type." : "No results yet. Try another search or provider."}
               </div>
             )}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+function reactionKey(value) {
+  return String(value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function findReactionPreview(reaction, items) {
+  const key = reactionKey(reaction);
+  const aliases = {
+    crying: ["cry"],
+    cry: ["crying"],
+    dance: ["dancing"],
+    dancing: ["dance"],
+    hugs: ["hug"],
+    hug: ["hugs"],
+  };
+  const targets = new Set([key, ...(aliases[key] ?? [])]);
+  return items.find((item) =>
+    [item.title, item.query].some((value) => targets.has(reactionKey(value))),
+  )?.imageUrl;
+}
+
+function ReactionSections({ providers, results, loading, onSelect }) {
+  if (!providers.length) {
+    return <div className="empty-state">Choose at least one provider above to browse its reactions.</div>;
+  }
+  return (
+    <div className="reaction-provider-list">
+      {providers.map((provider) => {
+        const reactions = REACTIONS_BY_PROVIDER[provider] ?? [];
+        const previews = results[provider]?.items ?? [];
+        return (
+          <section className={`reaction-source ${provider}`} key={provider}>
+            <header className="reaction-source-heading">
+              <span className={`provider-dot ${provider}`} />
+              <h3>{PROVIDER_NAMES[provider]} reactions</h3>
+              <span>{reactions.length} categories</span>
+              {loading && <span className="reaction-preview-status">Loading previews…</span>}
+            </header>
+            {results[provider]?.error && (
+              <div className="reaction-preview-error">
+                Categories list is shown; preview images are unavailable: {results[provider].error}
+              </div>
+            )}
+            <div className="reaction-catalog">
+              {reactions.map((reaction, index) => {
+                const previewUrl = findReactionPreview(reaction, previews);
+                return (
+                  <button
+                    className="reaction-tile"
+                    key={`${provider}-${reaction}-${index}`}
+                    onClick={() => onSelect(reaction, provider)}
+                    aria-label={`Search ${PROVIDER_NAMES[provider]} for ${reaction}`}
+                  >
+                    <span className={`reaction-tile-art hue-${index % 6}`}>
+                      {previewUrl
+                        ? <img src={previewUrl} alt="" loading="lazy" />
+                        : <span aria-hidden="true">{["✦", "☺", "♥", "✳", "☁", "✧"][index % 6]}</span>}
+                      <span className="reaction-tile-arrow" aria-hidden="true">↗</span>
+                    </span>
+                    <span className="reaction-tile-name">{reaction}</span>
+                  </button>
+                );
+              })}
+            </div>
           </section>
         );
       })}
