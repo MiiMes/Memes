@@ -33,7 +33,6 @@ jobs:
         run: |
           test -n "$VITE_GIPHY_API_KEY" || { echo "Missing Actions secret: VITE_GIPHY_API_KEY" >&2; exit 1; }
           test -n "$VITE_TENOR_API_KEY" || { echo "Missing Actions secret: VITE_TENOR_API_KEY" >&2; exit 1; }
-          test -n "$VITE_TENOR_CLIENT_KEY" || { echo "Missing Actions secret: VITE_TENOR_CLIENT_KEY" >&2; exit 1; }
           test -n "$VITE_KLIPY_API_KEY" || { echo "Missing Actions secret: VITE_KLIPY_API_KEY" >&2; exit 1; }
       - run: npm run build
         env:

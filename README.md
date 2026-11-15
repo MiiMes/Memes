@@ -64,9 +64,9 @@ repository Actions secrets:
 
 - `VITE_GIPHY_API_KEY`
 - `VITE_TENOR_API_KEY`
-- `VITE_TENOR_CLIENT_KEY`
 - `VITE_KLIPY_API_KEY`
 
+`VITE_TENOR_CLIENT_KEY` is optional and defaults to `tenor_web`.
 The credentials are public in a static app, so restrict them in each provider
 dashboard. After adding or changing the secrets, rerun the **Deploy frontend
 to GitHub Pages** workflow; the keys are embedded into the frontend at build

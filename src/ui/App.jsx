@@ -17,6 +17,7 @@ const queryClient = new QueryClient({
 });
 
 const PROVIDERS = ["giphy", "tenor", "klipy"];
+const TRENDING_SEARCH_PROVIDERS = ["giphy", "tenor"];
 const PROVIDER_NAMES = { giphy: "GIPHY", tenor: "Tenor", klipy: "KLIPY" };
 const LOCALES = [
   ["sq_AL", "Albanian · Albania"],
@@ -157,7 +158,7 @@ const PROVIDER_CONFIG = {
   },
   tenor: {
     key: import.meta.env.VITE_TENOR_API_KEY ?? "",
-    clientKey: import.meta.env.VITE_TENOR_CLIENT_KEY ?? "",
+    clientKey: import.meta.env.VITE_TENOR_CLIENT_KEY || "tenor_web",
   },
   klipy: {
     key: import.meta.env.VITE_KLIPY_API_KEY ?? "",
@@ -373,7 +374,7 @@ function makeRequest(provider, action, options) {
 
   if (provider === "tenor") {
     if (!PROVIDER_CONFIG.tenor.key || !PROVIDER_CONFIG.tenor.clientKey) {
-      return { error: "Set VITE_TENOR_API_KEY and VITE_TENOR_CLIENT_KEY to enable Tenor." };
+      return { error: "Set VITE_TENOR_API_KEY to enable Tenor." };
     }
     if (action !== "trending-searches" && kind !== "gif") {
       return { unsupported: "Tenor results in this starter are GIF-only." };
@@ -525,9 +526,13 @@ function MemeApp() {
     enabled: page === "home",
   });
   const trendingQuery = useQuery({
-    queryKey: ["trending-searches", locale, providers],
+    queryKey: ["trending-searches", locale],
     queryFn: () => requestProviders({
-      providers, action: "trending-searches", kind, locale, logRequest,
+      providers: TRENDING_SEARCH_PROVIDERS,
+      action: "trending-searches",
+      kind,
+      locale,
+      logRequest,
     }),
     enabled: page === "home",
   });
