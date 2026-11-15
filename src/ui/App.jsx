@@ -357,7 +357,9 @@ function makeRequest(provider, action, options) {
         : `/v1/${kind === "sticker" ? "stickers" : "gifs"}/${action === "search" ? "search" : "trending"}`;
     const url = new URL(`https://api.giphy.com${path}`);
     url.searchParams.set("api_key", PROVIDER_CONFIG.giphy.key);
-    if (action !== "categories") url.searchParams.set("limit", String(limit));
+    if (action !== "categories" && action !== "trending-searches") {
+      url.searchParams.set("limit", String(limit));
+    }
     if (action === "search") url.searchParams.set("q", q);
     if (action === "search" || action === "trending") {
       url.searchParams.set("rating", "g");
@@ -390,7 +392,7 @@ function makeRequest(provider, action, options) {
     url.searchParams.set("client_key", PROVIDER_CONFIG.tenor.clientKey);
     url.searchParams.set("locale", locale);
     if (locale.includes("_")) url.searchParams.set("country", locale.split("_")[1]);
-    url.searchParams.set("limit", String(limit));
+    if (action !== "trending-searches") url.searchParams.set("limit", String(limit));
     url.searchParams.set("contentfilter", "medium");
     if (action === "trending-searches") url.searchParams.set("type", "trending");
     if (action === "search") {
@@ -618,12 +620,22 @@ function MemeApp() {
 
   const visibleResults = mediaQuery.data ?? {};
   const visibleTrendingSearches = trendingQuery.data ?? {};
-  const trendingSearchTerms = Array.from({ length: 5 }, (_, index) =>
+  const trendingSearchItems = Object.fromEntries(
+    TRENDING_SEARCH_PROVIDERS.map((provider) => [
+      provider,
+      visibleTrendingSearches[provider]?.items ?? [],
+    ]),
+  );
+  const trendingSearchCount = Math.max(
+    0,
+    ...Object.values(trendingSearchItems).map((items) => items.length),
+  );
+  const trendingSearchTerms = Array.from({ length: trendingSearchCount }, (_, index) =>
     TRENDING_SEARCH_PROVIDERS.flatMap((provider) => {
-      const term = visibleTrendingSearches[provider]?.items?.[index];
+      const term = trendingSearchItems[provider][index];
       return term ? [{ ...term, provider }] : [];
     }),
-  ).flat().slice(0, 8);
+  ).flat();
   const trendingSearchErrors = TRENDING_SEARCH_PROVIDERS.flatMap((provider) => {
     const error = visibleTrendingSearches[provider]?.error;
     return error ? [{ provider, error }] : [];
@@ -835,6 +847,7 @@ function TrendingSearchStrip({ searches, errors, locale, logRequest, onSelect })
           <p className="eyebrow dark-eyebrow">WHAT'S POPULAR</p>
           <h2 id="trending-search-heading">Trending searches</h2>
         </div>
+        <span className="trending-search-count">{searches.length} searches</span>
       </div>
       {errors.map(({ provider, error }) => (
         <p className="trending-search-error" key={provider} role="status">

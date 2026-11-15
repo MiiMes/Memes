@@ -73,9 +73,10 @@ h1, h2, h3, p { margin-top: 0; }
 
 .content-section { padding: 54px 7.2% 88px; min-height: 400px; }
 .trending-search-section { margin-bottom: 42px; }
-.trending-search-heading { margin-bottom: 16px; }
+.trending-search-heading { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .trending-search-heading .eyebrow { margin-bottom: 7px; }
 .trending-search-heading h2 { margin: 0; font: 600 25px "Space Grotesk", sans-serif; letter-spacing: -1px; }
+.trending-search-count { color: #89878a; font-size: 11px; }
 .trending-search-strip { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 7px; scrollbar-width: thin; }
 .trending-search-card { flex: 0 0 165px; padding: 0; overflow: hidden; border: 1px solid #e8e7e5; border-radius: 10px; color: #29282a; background: white; text-align: left; transition: transform .18s ease, box-shadow .18s ease; }
 .trending-search-card:hover { transform: translateY(-3px); box-shadow: 0 9px 24px #25212212; }
