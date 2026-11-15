@@ -78,6 +78,8 @@ export function useAppController() {
   const [apiRunId, setApiRunId] = useState(0);
   const [copied, setCopied] = useState(false);
   const [resultsLayout, setResultsLayout] = useState("providers");
+  const [paginationMode, setPaginationMode] = useState("infinite");
+  const [resultsPageIndex, setResultsPageIndex] = useState(0);
   const [similarityState, setSimilarityState] = useState({
     reference: null,
     results: [],
@@ -163,6 +165,10 @@ export function useAppController() {
     apiQuery,
     logRequest,
   });
+
+  useEffect(() => {
+    setResultsPageIndex(0);
+  }, [submittedQuery, kind, locale, providers]);
 
   function submitSearch(event) {
     event.preventDefault();
@@ -261,6 +267,39 @@ export function useAppController() {
       }];
     }));
   }, [mediaQuery.data, providers]);
+
+  const pagedResults = useMemo(() => {
+    const pages = mediaQuery.data?.pages ?? [];
+    const currentPage = pages[resultsPageIndex] ?? {};
+    return Object.fromEntries(providers.map((provider) => [
+      provider,
+      currentPage[provider] ?? { items: [], exhausted: resultsPageIndex > 0 },
+    ]));
+  }, [mediaQuery.data, providers, resultsPageIndex]);
+
+  const goToPreviousResultsPage = useCallback(() => {
+    setResultsPageIndex((current) => Math.max(0, current - 1));
+  }, []);
+
+  const goToNextResultsPage = useCallback(async () => {
+    const pages = mediaQuery.data?.pages ?? [];
+    if (resultsPageIndex < pages.length - 1) {
+      setResultsPageIndex(resultsPageIndex + 1);
+      return;
+    }
+    if (!mediaQuery.hasNextPage || mediaQuery.isFetchingNextPage) return;
+    const result = await mediaQuery.fetchNextPage();
+    if ((result.data?.pages?.length ?? 0) > resultsPageIndex + 1) {
+      setResultsPageIndex(resultsPageIndex + 1);
+    }
+  }, [
+    mediaQuery.data,
+    mediaQuery.fetchNextPage,
+    mediaQuery.hasNextPage,
+    mediaQuery.isFetchingNextPage,
+    resultsPageIndex,
+  ]);
+
   async function findSimilar(reference) {
     const requestId = similarityRequestRef.current + 1;
     similarityRequestRef.current = requestId;
@@ -378,7 +417,7 @@ export function useAppController() {
 
   return {
     page, query, setQuery, submittedQuery, kind, setKind, locale, setLocale,
-    providers, logs, logRequest, mediaQuery, visibleResults,
+    providers, logs, logRequest, mediaQuery, visibleResults, pagedResults,
     favorites, favoritesError, isFavorite, toggleFavorite,
     favoriteFonts, favoriteFontsError, toggleFavoriteFont, exportData, importData,
     collections, collectionsError, createCollection, updateFavorite,
@@ -388,7 +427,8 @@ export function useAppController() {
     apiAction, setApiAction, apiQuery, setApiQuery, apiQueryResult,
     consoleRoute, consoleJson, copied, copyJson, submitSearch, chooseSearch,
     recentSearches, recentSearchError, clearRecentSearches,
-    resultsLayout, setResultsLayout,
+    resultsLayout, setResultsLayout, paginationMode, setPaginationMode,
+    resultsPageIndex, goToPreviousResultsPage, goToNextResultsPage,
     similarityState, findSimilar, clearSimilarResults,
     toggleProvider, runApi: () => setApiRunId((current) => current + 1),
     clearLogs: () => setLogs([]),

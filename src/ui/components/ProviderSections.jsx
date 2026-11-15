@@ -3,7 +3,16 @@ import { PROVIDER_NAMES } from "../constants/appConstants.js";
 import { ExploreSections } from "./ExploreSections.jsx";
 import { MediaCard } from "./MediaComponents.jsx";
 
-function PaginationControl({ hasNextPage, isFetchingNextPage, onLoadMore }) {
+function PaginationControl({
+  mode,
+  hasNextPage,
+  isFetchingNextPage,
+  onLoadMore,
+  currentPage,
+  totalPages,
+  onPreviousPage,
+  onNextPage,
+}) {
   const sentinelRef = useRef(null);
   const loadingRef = useRef(false);
 
@@ -13,6 +22,7 @@ function PaginationControl({ hasNextPage, isFetchingNextPage, onLoadMore }) {
 
   useEffect(() => {
     if (
+      mode !== "infinite" ||
       !hasNextPage ||
       isFetchingNextPage ||
       typeof globalThis.IntersectionObserver !== "function" ||
@@ -25,12 +35,40 @@ function PaginationControl({ hasNextPage, isFetchingNextPage, onLoadMore }) {
     }, { rootMargin: "600px" });
     observer.observe(sentinelRef.current);
     return () => observer.disconnect();
-  }, [hasNextPage, isFetchingNextPage, onLoadMore]);
+  }, [mode, hasNextPage, isFetchingNextPage, onLoadMore]);
 
   function loadNextPage() {
-    if (!hasNextPage || isFetchingNextPage || loadingRef.current) return;
+    if (mode !== "infinite" || !hasNextPage || isFetchingNextPage || loadingRef.current) return;
     loadingRef.current = true;
     onLoadMore();
+  }
+
+  if (mode === "paged") {
+    const canGoNext = currentPage < totalPages || hasNextPage;
+    return (
+      <div className="results-pagination results-pagination-paged">
+        <button
+          className="meme-editor-secondary"
+          type="button"
+          onClick={onPreviousPage}
+          disabled={currentPage <= 1 || isFetchingNextPage}
+        >
+          Previous
+        </button>
+        <span>
+          Page {currentPage} of {totalPages}{hasNextPage ? "+" : ""}
+          {isFetchingNextPage ? " · Loading next page..." : ""}
+        </span>
+        <button
+          className="meme-editor-secondary"
+          type="button"
+          onClick={onNextPage}
+          disabled={!canGoNext || isFetchingNextPage}
+        >
+          Next
+        </button>
+      </div>
+    );
   }
 
   if (!hasNextPage) return null;
@@ -66,6 +104,11 @@ export function ProviderSections({
   hasNextPage = false,
   isFetchingNextPage = false,
   onLoadMore,
+  paginationMode = "infinite",
+  currentPage = 1,
+  totalPages = 1,
+  onPreviousPage,
+  onNextPage,
 }) {
   if (categoryView) {
     return (
@@ -132,9 +175,14 @@ export function ProviderSections({
           <div className="provider-empty">No results yet. Try another search or provider.</div>
         ) : null}
         <PaginationControl
+          mode={paginationMode}
           hasNextPage={hasNextPage}
           isFetchingNextPage={isFetchingNextPage}
           onLoadMore={onLoadMore}
+          currentPage={currentPage}
+          totalPages={totalPages}
+          onPreviousPage={onPreviousPage}
+          onNextPage={onNextPage}
         />
       </section>
     );
@@ -170,16 +218,23 @@ export function ProviderSections({
               </div>
             ) : !result?.error ? (
               <div className="provider-empty">
-                No results yet. Try another search or provider.
+                {result?.exhausted
+                  ? "No more results from this provider."
+                  : "No results yet. Try another search or provider."}
               </div>
             ) : null}
           </section>
         );
       })}
       <PaginationControl
+        mode={paginationMode}
         hasNextPage={hasNextPage}
         isFetchingNextPage={isFetchingNextPage}
         onLoadMore={onLoadMore}
+        currentPage={currentPage}
+        totalPages={totalPages}
+        onPreviousPage={onPreviousPage}
+        onNextPage={onNextPage}
       />
     </div>
   );
