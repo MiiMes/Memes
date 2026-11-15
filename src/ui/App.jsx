@@ -859,6 +859,29 @@ function MediaSwitch({ kind, setKind }) {
 }
 
 function TrendingSearchStrip({ searches, errors, locale, logRequest, onSelect }) {
+  const stripRef = useRef(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const updateScrollState = useCallback(() => {
+    const strip = stripRef.current;
+    if (!strip) return;
+    setCanScrollLeft(strip.scrollLeft > 1);
+    setCanScrollRight(strip.scrollLeft + strip.clientWidth < strip.scrollWidth - 1);
+  }, []);
+
+  useEffect(() => {
+    updateScrollState();
+    window.addEventListener("resize", updateScrollState);
+    return () => window.removeEventListener("resize", updateScrollState);
+  }, [searches.length, updateScrollState]);
+
+  function scrollStrip(direction) {
+    const strip = stripRef.current;
+    if (!strip) return;
+    strip.scrollBy({ left: direction * strip.clientWidth * 0.8, behavior: "smooth" });
+  }
+
   return (
     <section className="trending-search-section" aria-labelledby="trending-search-heading">
       <div className="trending-search-heading">
@@ -873,17 +896,37 @@ function TrendingSearchStrip({ searches, errors, locale, logRequest, onSelect })
           Could not load {PROVIDER_NAMES[provider]} trending searches: {error}
         </p>
       ))}
-      <div className="trending-search-strip">
-        {searches.map((term, index) => (
-          <TrendingSearchCard
-            key={`${term.provider}-${term.query}-${index}`}
-            term={term}
-            index={index}
-            locale={locale}
-            logRequest={logRequest}
-            onSelect={() => onSelect(term.query)}
-          />
-        ))}
+      <div className="trending-search-carousel">
+        <button
+          className="trending-search-arrow"
+          type="button"
+          aria-label="Scroll trending searches left"
+          disabled={!canScrollLeft}
+          onClick={() => scrollStrip(-1)}
+        >←</button>
+        <div
+          className="trending-search-strip"
+          ref={stripRef}
+          onScroll={updateScrollState}
+        >
+          {searches.map((term, index) => (
+            <TrendingSearchCard
+              key={`${term.provider}-${term.query}-${index}`}
+              term={term}
+              index={index}
+              locale={locale}
+              logRequest={logRequest}
+              onSelect={() => onSelect(term.query)}
+            />
+          ))}
+        </div>
+        <button
+          className="trending-search-arrow"
+          type="button"
+          aria-label="Scroll trending searches right"
+          disabled={!canScrollRight}
+          onClick={() => scrollStrip(1)}
+        >→</button>
       </div>
     </section>
   );
