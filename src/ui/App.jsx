@@ -198,15 +198,34 @@ function normalizeGiphy(item, kind) {
     images.fixed_height?.url ??
     images.original?.url ??
     "";
+  const posterUrl =
+    images.fixed_width_still?.url ??
+    images.fixed_height_still?.url ??
+    imageUrl;
+  const videoUrl = kind === "clip"
+    ? [
+      item.mp4,
+      item.video,
+      images.fixed_width?.mp4,
+      images.fixed_height?.mp4,
+      images.original?.mp4,
+    ].map(mediaFileUrl).find(Boolean) ?? ""
+    : "";
   return {
     id: String(item.id ?? item.slug ?? imageUrl),
     title: item.title || item.slug || "GIPHY result",
-    imageUrl,
+    imageUrl: videoUrl || (kind === "clip" ? posterUrl : imageUrl),
+    posterUrl: kind === "clip" ? posterUrl : "",
     pageUrl: item.url ?? "",
     provider: "giphy",
     kind,
+    video: Boolean(videoUrl),
     username: item.username || item.user?.username || "",
   };
+}
+
+function mediaFileUrl(file) {
+  return typeof file === "string" ? file : file?.url ?? "";
 }
 
 function normalizeTenor(item) {
@@ -232,14 +251,23 @@ function normalizeKlipy(item, kind) {
     ? [item.file?.hd, item.file?.md, item.file?.sm, item.file?.xs]
     : [item.file?.sm, item.file?.md, item.file?.xs, item.file?.hd];
   const files = sizes.filter(Boolean);
-  const videoUrl = files.map((file) => file.mp4?.url ?? file.webm?.url).find(Boolean);
+  const videoUrl = mediaFileUrl(item.file?.mp4) ||
+    files.map((file) => mediaFileUrl(file.mp4) || mediaFileUrl(file.webm)).find(Boolean) ||
+    "";
+  const previewUrl = mediaFileUrl(item.file?.gif) ||
+    mediaFileUrl(item.file?.webp) ||
+    files.map((file) => mediaFileUrl(file.gif) || mediaFileUrl(file.webp)).find(Boolean) ||
+    item.preview_url ||
+    item.blur_preview ||
+    "";
   const imageUrl = kind === "clip"
-    ? videoUrl ?? ""
-    : files.map((file) => file.gif?.url ?? file.webp?.url).find(Boolean) ?? item.preview_url ?? "";
+    ? videoUrl || previewUrl
+    : files.map((file) => mediaFileUrl(file.gif) || mediaFileUrl(file.webp)).find(Boolean) ?? item.preview_url ?? "";
   return {
     id: String(item.id ?? item.slug ?? imageUrl),
     title: item.title ?? item.slug ?? "KLIPY result",
     imageUrl,
+    posterUrl: kind === "clip" ? previewUrl : "",
     pageUrl: item.url ?? "",
     provider: "klipy",
     kind,
@@ -287,8 +315,8 @@ function makeRequest(provider, action, options) {
     if (!PROVIDER_CONFIG.giphy.key) {
       return { error: "Set VITE_GIPHY_API_KEY to enable GIPHY." };
     }
-    if (kind === "clip" && action !== "trending-searches") {
-      return { unsupported: "GIPHY Clips are available through its SDK, not this public API." };
+    if (kind === "clip" && action !== "trending" && action !== "trending-searches") {
+      return { unsupported: "GIPHY Clips in this app are available through trending only." };
     }
     if (action === "categories" && kind !== "gif") {
       return { unsupported: "GIPHY categories in this starter are available for GIFs only." };
@@ -297,6 +325,8 @@ function makeRequest(provider, action, options) {
       ? "/v1/gifs/categories"
       : action === "trending-searches"
         ? "/v1/trending/searches"
+        : kind === "clip"
+          ? "/v1/clips/trending"
         : `/v1/${kind === "sticker" ? "stickers" : "gifs"}/${action === "search" ? "search" : "trending"}`;
     const url = new URL(`https://api.giphy.com${path}`);
     url.searchParams.set("api_key", PROVIDER_CONFIG.giphy.key);
@@ -944,7 +974,7 @@ function ReactionTile({
 
 function MediaCard({ item, onSelect }) {
   const content = item.video ? (
-    <video src={item.imageUrl} autoPlay muted loop playsInline aria-label={item.title} />
+    <video src={item.imageUrl} poster={item.posterUrl || undefined} autoPlay muted loop playsInline aria-label={item.title} />
   ) : (
     item.imageUrl
       ? <img src={item.imageUrl} alt={item.title} loading="lazy" />

@@ -47,8 +47,9 @@ previously pasted into chat should be revoked/rotated before deployment.
 
 KLIPY integration approval was confirmed by the project owner. Its media URLs
 are used as returned, and each provider remains in its own result section.
-GIPHY Clips are not available through its public API (the docs list Clips as
-SDK-only); Tenor and GIPHY return GIF-only results for the Clips selection.
+GIPHY Clips are available in the trending view through its `/v1/clips/trending`
+endpoint; clip search is not enabled in this app. Tenor returns GIF-only
+results for the Clips selection.
 Tenor's current documentation says it is no longer accepting new API clients
 as of January 2026, so confirm that the existing key remains active.
 
