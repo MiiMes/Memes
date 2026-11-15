@@ -630,12 +630,31 @@ function MemeApp() {
     0,
     ...Object.values(trendingSearchItems).map((items) => items.length),
   );
-  const trendingSearchTerms = Array.from({ length: trendingSearchCount }, (_, index) =>
-    TRENDING_SEARCH_PROVIDERS.flatMap((provider) => {
+  const trendingSearchesByQuery = new Map();
+  for (let index = 0; index < trendingSearchCount; index += 1) {
+    for (const provider of TRENDING_SEARCH_PROVIDERS) {
       const term = trendingSearchItems[provider][index];
-      return term ? [{ ...term, provider }] : [];
-    }),
-  ).flat();
+      if (!term) continue;
+      const query = String(term.query ?? term.title ?? "").trim().replace(/\s+/g, " ");
+      const key = query.toLowerCase();
+      if (!key) continue;
+
+      const existing = trendingSearchesByQuery.get(key);
+      if (existing) {
+        if (!existing.providers.includes(provider)) existing.providers.push(provider);
+      } else {
+        trendingSearchesByQuery.set(key, {
+          ...term,
+          title: term.title || query,
+          query,
+          provider,
+          providers: [provider],
+        });
+      }
+    }
+  }
+  const trendingSearchTerms = Array.from(trendingSearchesByQuery.values())
+    .sort((left, right) => right.providers.length - left.providers.length);
   const trendingSearchErrors = TRENDING_SEARCH_PROVIDERS.flatMap((provider) => {
     const error = visibleTrendingSearches[provider]?.error;
     return error ? [{ provider, error }] : [];
@@ -847,7 +866,7 @@ function TrendingSearchStrip({ searches, errors, locale, logRequest, onSelect })
           <p className="eyebrow dark-eyebrow">WHAT'S POPULAR</p>
           <h2 id="trending-search-heading">Trending searches</h2>
         </div>
-        <span className="trending-search-count">{searches.length} searches</span>
+        <span className="trending-search-count">{searches.length} unique searches</span>
       </div>
       {errors.map(({ provider, error }) => (
         <p className="trending-search-error" key={provider} role="status">
@@ -924,8 +943,8 @@ function TrendingSearchCard({ term, index, locale, logRequest, onSelect }) {
           : <span aria-hidden="true">{term.title}</span>}
       </span>
       <span className="trending-search-title">{term.title}</span>
-      <span className={`trending-search-provider ${term.provider}`}>
-        {PROVIDER_NAMES[term.provider]}
+      <span className={`trending-search-provider ${term.providers.length > 1 ? "both" : term.provider}`}>
+        {term.providers.map((provider) => PROVIDER_NAMES[provider]).join(" + ")}
       </span>
     </button>
   );
