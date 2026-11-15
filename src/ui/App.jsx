@@ -130,7 +130,7 @@ function normalizeKlipy(item, kind) {
   const videoUrl = files.map((file) => file.mp4?.url ?? file.webm?.url).find(Boolean);
   const imageUrl = kind === "clip"
     ? videoUrl ?? ""
-    : files.map((file) => file.webp?.url ?? file.gif?.url).find(Boolean) ?? item.preview_url ?? "";
+    : files.map((file) => file.gif?.url ?? file.webp?.url).find(Boolean) ?? item.preview_url ?? "";
   return {
     id: String(item.id ?? item.slug ?? imageUrl),
     title: item.title ?? item.slug ?? "KLIPY result",
@@ -139,7 +139,7 @@ function normalizeKlipy(item, kind) {
     provider: "klipy",
     kind,
     username: item.username ?? "",
-    video: Boolean(videoUrl),
+    video: kind === "clip" && Boolean(videoUrl),
   };
 }
 
@@ -215,7 +215,7 @@ function makeRequest(provider, action, options) {
     }
     const path = {
       search: "/v2/search",
-      trending: "/v2/trending",
+      trending: "/v2/featured",
       "trending-searches": "/v2/trending_terms",
       categories: "/v2/categories",
     }[action];
