@@ -127,6 +127,7 @@ export async function copyMediaToClipboard(item) {
   const errors = [];
   let fetchError;
   let imageBlob;
+  let staticPngBlob;
   const getImageBlob = () => {
     if (!imageBlob) {
       imageBlob = fetch(mediaUrl)
@@ -154,6 +155,12 @@ export async function copyMediaToClipboard(item) {
       imageBlob.catch(() => {});
     }
     return imageBlob;
+  };
+  const getStaticPngBlob = () => {
+    if (!staticPngBlob) {
+      staticPngBlob = getImageBlob().then((blob) => createStaticPng(blob, logger));
+    }
+    return staticPngBlob;
   };
 
   const supports = (format) => {
@@ -194,6 +201,34 @@ export async function copyMediaToClipboard(item) {
   };
 
   try {
+    if (mimeType === "image/gif") {
+      const formats = {
+        "text/plain": new Blob([mediaUrl], { type: "text/plain" }),
+      };
+      if (richHtmlSupport !== false) {
+        const html = `<img src="${escapeHtml(mediaUrl)}" alt="${escapeHtml(item.title || "GIF")}">`;
+        formats["text/html"] = new Blob([html], { type: "text/html" });
+      }
+      if (pngFormatSupport !== false) {
+        formats["image/png"] = getStaticPngBlob();
+      }
+      if (nativeFormatSupport === true) {
+        formats[mimeType] = getImageBlob();
+      }
+      if (customFormatSupport === true) {
+        formats[customMimeType] = getImageBlob();
+      }
+
+      if (Object.keys(formats).length > 1) {
+        const multiFormatResult = await writeCandidate(
+          "GIF multi-format clipboard write",
+          formats,
+          { method: "multi-format", mimeType, formats: Object.keys(formats) },
+        );
+        if (multiFormatResult) return multiFormatResult;
+      }
+    }
+
     if (mimeType === "image/gif" && richHtmlSupport !== false) {
       const html = `<img src="${escapeHtml(mediaUrl)}" alt="${escapeHtml(item.title || "GIF")}">`;
       const richHtmlResult = await writeCandidate(
@@ -222,10 +257,9 @@ export async function copyMediaToClipboard(item) {
 
     const writeStaticPng = async () => {
       if (mimeType !== "image/gif" || pngFormatSupport === false) return null;
-      const pngBlob = getImageBlob().then((blob) => createStaticPng(blob, logger));
       return writeCandidate(
         "Static PNG image/png write",
-        { "image/png": pngBlob },
+        { "image/png": getStaticPngBlob() },
         { method: "static-png", mimeType: "image/png" },
       );
     };

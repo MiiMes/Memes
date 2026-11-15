@@ -91,9 +91,12 @@ export function MediaCard({
         native: `${mediaName} bytes copied (${copyFormat.mimeType}); paste to verify.`,
         "web-custom": `${mediaName} browser-specific data was accepted; Discord may ignore it.`,
       };
+      const message = copyFormat.method === "multi-format"
+        ? `Clipboard accepted ${copyFormat.formats.join(", ")}; app behavior varies and PNG is static.`
+        : copyMessages[copyFormat.method] ?? `${mediaName} copy accepted by the browser.`;
       showCopyFeedback({
         tone: copyFormat.method === "web-custom" ? "error" : "success",
-        message: copyMessages[copyFormat.method] ?? `${mediaName} copy accepted by the browser.`,
+        message,
       });
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
