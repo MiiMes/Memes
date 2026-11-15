@@ -1,6 +1,7 @@
 import { decompressFrames, parseGIF } from "gifuct-js";
-import gifenc from "gifenc";
+import * as gifencModule from "gifenc";
 
+const gifenc = gifencModule.GIFEncoder ? gifencModule : gifencModule.default;
 const { GIFEncoder, applyPalette, quantize } = gifenc;
 const MAX_GIF_BYTES = 20 * 1024 * 1024;
 const MAX_GIF_FRAMES = 120;
