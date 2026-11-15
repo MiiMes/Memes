@@ -1,3 +1,5 @@
+const MAX_STATIC_PNG_PIXELS = 16_000_000;
+
 function imageMimeType(url) {
   const pathname = new URL(url).pathname.toLowerCase();
   if (pathname.endsWith(".gif")) return "image/gif";
@@ -5,6 +7,52 @@ function imageMimeType(url) {
   if (pathname.endsWith(".png")) return "image/png";
   if (pathname.endsWith(".jpg") || pathname.endsWith(".jpeg")) return "image/jpeg";
   return "";
+}
+
+async function createStaticPng(gifBlob, logger) {
+  const image = new globalThis.Image();
+  const objectUrl = globalThis.URL.createObjectURL(gifBlob);
+  try {
+    if (typeof image.decode === "function") {
+      image.src = objectUrl;
+      await image.decode();
+    } else {
+      await new Promise((resolve, reject) => {
+        image.onload = resolve;
+        image.onerror = () => reject(new Error("The GIF's first frame could not be decoded."));
+        image.src = objectUrl;
+      });
+    }
+
+    const width = image.naturalWidth;
+    const height = image.naturalHeight;
+    if (!width || !height || width * height > MAX_STATIC_PNG_PIXELS) {
+      throw new Error("The GIF is too large to safely copy as a static image.");
+    }
+
+    const canvas = globalThis.document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("This browser cannot create a PNG clipboard image.");
+    context.drawImage(image, 0, 0, width, height);
+
+    const pngBlob = await new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error("The browser could not export the GIF frame as PNG."));
+      }, "image/png");
+    });
+    logger.log("GIF converted to static PNG", {
+      width,
+      height,
+      byteLength: pngBlob.size,
+      animationPreserved: false,
+    });
+    return pngBlob;
+  } finally {
+    globalThis.URL.revokeObjectURL(objectUrl);
+  }
 }
 
 function errorDetails(error) {
@@ -104,9 +152,11 @@ export async function copyMediaToClipboard(item) {
   const customMimeType = `web ${mimeType}`;
   const customFormatSupport = supports(customMimeType);
   const nativeFormatSupport = supports(mimeType);
+  const pngFormatSupport = supports("image/png");
   logger.log("Clipboard format support", {
     native: { format: mimeType, supported: nativeFormatSupport },
     custom: { format: customMimeType, supported: customFormatSupport },
+    staticImageFallback: { format: "image/png", supported: pngFormatSupport },
   });
 
   const writeCandidate = async (label, formats, result) => {
@@ -126,12 +176,32 @@ export async function copyMediaToClipboard(item) {
   };
 
   try {
+    const writeStaticPng = async () => {
+      if (mimeType !== "image/gif" || pngFormatSupport === false) return null;
+      const pngBlob = imageBlob.then((blob) => createStaticPng(blob, logger));
+      return writeCandidate(
+        "Static PNG image/png write",
+        { "image/png": pngBlob },
+        { method: "static-png", mimeType: "image/png" },
+      );
+    };
+
+    if (mimeType === "image/gif" && nativeFormatSupport === false) {
+      const pngResult = await writeStaticPng();
+      if (pngResult) return pngResult;
+    }
+
     const nativeResult = await writeCandidate(
       `Native ${mimeType} Blob write`,
       { [mimeType]: imageBlob },
       { method: "native", mimeType },
     );
     if (nativeResult) return nativeResult;
+
+    if (mimeType === "image/gif" && nativeFormatSupport !== false) {
+      const pngResult = await writeStaticPng();
+      if (pngResult) return pngResult;
+    }
 
     if (customFormatSupport === true) {
       const customResult = await writeCandidate(
