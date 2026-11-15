@@ -86,6 +86,7 @@ export function MediaCard({
       const mediaName = item.kind === "sticker" ? "Sticker" : "GIF";
       const copyMessages = {
         "rich-html": "GIF copied as rich HTML; the app may paste its preview or the plain-text link.",
+        "text-url": "Rich clipboard write failed; copied the GIF link instead.",
         "static-png": "GIF animation could not be copied; its first frame was copied as a static PNG.",
         native: `${mediaName} bytes copied (${copyFormat.mimeType}); paste to verify.`,
         "web-custom": `${mediaName} browser-specific data was accepted; Discord may ignore it.`,

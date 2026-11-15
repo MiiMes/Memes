@@ -207,6 +207,19 @@ export async function copyMediaToClipboard(item) {
       if (richHtmlResult) return richHtmlResult;
     }
 
+    if (mimeType === "image/gif" && typeof clipboard.writeText === "function") {
+      try {
+        await clipboard.writeText(mediaUrl);
+        logger.log("GIF URL text fallback accepted by browser", {
+          note: "This copies a link, not GIF image data.",
+        });
+        return { method: "text-url", mimeType: "text/plain" };
+      } catch (error) {
+        errors.push(error);
+        logger.log("GIF URL text fallback rejected", errorDetails(error));
+      }
+    }
+
     const writeStaticPng = async () => {
       if (mimeType !== "image/gif" || pngFormatSupport === false) return null;
       const pngBlob = getImageBlob().then((blob) => createStaticPng(blob, logger));
