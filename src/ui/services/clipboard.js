@@ -81,10 +81,10 @@ async function createStaticPng(blob) {
 }
 
 export async function copyMediaToClipboard(item) {
-  const mediaUrl = item.imageUrl;
+  const mediaUrl = item.gifUrl || item.imageUrl;
   if (!mediaUrl) throw new Error("This result has no media URL to copy.");
 
-  const mimeType = imageMimeType(mediaUrl, item.mimeType);
+  const mimeType = item.gifUrl ? "image/gif" : imageMimeType(mediaUrl, item.mimeType);
   if (!mimeType) throw new Error("This result does not have a recognizable image format.");
 
   const clipboard = globalThis.navigator?.clipboard;
@@ -162,8 +162,6 @@ export async function copyAnimatedGifToClipboard(blob) {
   }
 
   const formats = {};
-  if (ClipboardItemConstructor.supports?.("image/gif")) formats["image/gif"] = blob;
-  if (ClipboardItemConstructor.supports?.("web image/gif")) formats["web image/gif"] = blob;
 
   if (Object.keys(formats).length > 0) {
     try {
