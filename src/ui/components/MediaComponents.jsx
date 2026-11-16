@@ -139,14 +139,12 @@ export function MediaCard({
   ) : (
     item.imageUrl
       ? (
-        <meta charSet="utf-8">
-          <img
-            src={item.imageUrl}
-            alt={item.title}
-            loading="lazy"
-            onError={onImageError}
-          />
-        </meta>
+        <img
+          src={item.imageUrl}
+          alt={item.title}
+          loading="lazy"
+          onError={onImageError}
+        />
       )
       : <span className="media-placeholder">{item.title}</span>
   );

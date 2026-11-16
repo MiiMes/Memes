@@ -1367,20 +1367,18 @@ export function MemeEditor({
               }}
             />
           ) : (
-            <meta charSet="utf-8">
-              <img
-                ref={previewImageRef}
-                src={outputUrl || sourceUrl}
-                alt={item?.title || "Meme preview"}
-                style={{
-                  filter: `brightness(${transform.brightness}%) contrast(${transform.contrast}%)`,
-                  transform: `scale(${transform.zoom})${transform.flipX ? " scaleX(-1)" : ""}`,
-                  ...(outputDimensions
-                    ? { width: "100%", height: "100%", maxHeight: "none", objectFit: "cover" }
-                    : {}),
-                }}
-              />
-            </meta>
+            <img
+              ref={previewImageRef}
+              src={outputUrl || sourceUrl}
+              alt={item?.title || "Meme preview"}
+              style={{
+                filter: `brightness(${transform.brightness}%) contrast(${transform.contrast}%)`,
+                transform: `scale(${transform.zoom})${transform.flipX ? " scaleX(-1)" : ""}`,
+                ...(outputDimensions
+                  ? { width: "100%", height: "100%", maxHeight: "none", objectFit: "cover" }
+                  : {}),
+              }}
+            />
           )}
           {!outputUrl && (
             <canvas
@@ -1917,7 +1915,7 @@ export function MemeEditor({
             <div className="meme-editor-variant-grid">
               {variantItems.map((variant) => (
                 <article key={variant.caption}>
-                  <meta charSet="utf-8"><img src={variant.url} alt={variant.caption} /></meta>
+                  <img src={variant.url} alt={variant.caption} />
                   <p>{variant.caption}</p>
                   <button
                     className="meme-editor-secondary"
@@ -2251,13 +2249,11 @@ export function MemeEditor({
                     aria-label={item?.title || `Your edited ${getOutputExtension(outputBlob).toUpperCase()} video`}
                   />
                 ) : (
-                  <meta charSet="utf-8">
-                    <img
-                      className="meme-editor-dialog-image"
-                      src={outputUrl}
-                      alt={item?.title || "Your edited meme"}
-                    />
-                  </meta>
+                  <img
+                    className="meme-editor-dialog-image"
+                    src={outputUrl}
+                    alt={item?.title || "Your edited meme"}
+                  />
                 )}
                 <p className="meme-editor-dialog-note">
                   {outputBlob?.type === "image/gif"

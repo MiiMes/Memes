@@ -454,9 +454,7 @@ export function FavoritesSection({
               <span>{deckIndex + 1} / {visibleFavorites.length} · {currentDeckItem.title}</span>
               <button type="button" onClick={() => setIsDeckOpen(false)} aria-label="Close reaction deck">×</button>
             </header>
-            <meta charSet="utf-8">
-              <img src={currentDeckItem.imageUrl} alt={currentDeckItem.title} />
-            </meta>
+            <img src={currentDeckItem.imageUrl} alt={currentDeckItem.title} />
             <nav aria-label="Reaction deck controls">
               <button
                 type="button"
