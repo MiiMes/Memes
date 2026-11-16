@@ -14,22 +14,21 @@ function imageMimeType(url, knownMimeType) {
     if (commaIndex < 0) return "";
     const [mimeType, ...parameters] = url.slice(5, commaIndex).split(";");
     const normalizedMimeType = mimeType.toLowerCase();
-    return parameters.some((parameter) => parameter.toLowerCase() === "base64") &&
+    return parameters.some((p) => p.toLowerCase() === "base64") &&
       SUPPORTED_IMAGE_MIME_TYPES.has(normalizedMimeType)
       ? normalizedMimeType
       : "";
   }
 
-  let pathname;
   try {
-    pathname = new URL(url).pathname.toLowerCase();
+    const pathname = new URL(url, globalThis.location?.origin).pathname.toLowerCase();
+    if (pathname.endsWith(".gif")) return "image/gif";
+    if (pathname.endsWith(".webp")) return "image/webp";
+    if (pathname.endsWith(".png")) return "image/png";
+    if (pathname.endsWith(".jpg") || pathname.endsWith(".jpeg")) return "image/jpeg";
   } catch {
     return "";
   }
-  if (pathname.endsWith(".gif")) return "image/gif";
-  if (pathname.endsWith(".webp")) return "image/webp";
-  if (pathname.endsWith(".png")) return "image/png";
-  if (pathname.endsWith(".jpg") || pathname.endsWith(".jpeg")) return "image/jpeg";
   return "";
 }
 
@@ -43,111 +42,191 @@ function escapeHtml(value) {
   })[character]);
 }
 
-async function createStaticPng(gifBlob, logger) {
+/**
+ * Decodes an image blob and draws its first frame onto a canvas to export a static PNG.
+ */
+async function convertBlobToPng(blob) {
   const image = new globalThis.Image();
-  const objectUrl = globalThis.URL.createObjectURL(gifBlob);
+  const objectUrl = globalThis.URL.createObjectURL(blob);
+
   try {
+    image.src = objectUrl;
     if (typeof image.decode === "function") {
-      image.src = objectUrl;
       await image.decode();
     } else {
       await new Promise((resolve, reject) => {
         image.onload = resolve;
-        image.onerror = () => reject(new Error("The GIF's first frame could not be decoded."));
-        image.src = objectUrl;
+        image.onerror = () => reject(new Error("Image frame could not be decoded."));
       });
     }
 
     const width = image.naturalWidth;
     const height = image.naturalHeight;
     if (!width || !height || width * height > MAX_STATIC_PNG_PIXELS) {
-      throw new Error("The GIF is too large to safely copy as a static image.");
+      throw new Error("Image dimensions exceed safe clipboard limits.");
     }
 
     const canvas = globalThis.document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
     const context = canvas.getContext("2d");
-    if (!context) throw new Error("This browser cannot create a PNG clipboard image.");
+    if (!context) throw new Error("Canvas 2D context unavailable.");
+
     context.drawImage(image, 0, 0, width, height);
 
-    const pngBlob = await new Promise((resolve, reject) => {
-      canvas.toBlob((blob) => {
-        if (blob) resolve(blob);
-        else reject(new Error("The browser could not export the GIF frame as PNG."));
+    return await new Promise((resolve, reject) => {
+      canvas.toBlob((pngBlob) => {
+        if (pngBlob) resolve(pngBlob);
+        else reject(new Error("Canvas failed to export PNG blob."));
       }, "image/png");
     });
-    logger.log("GIF converted to static PNG", {
-      width,
-      height,
-      byteLength: pngBlob.size,
-      animationPreserved: false,
-    });
-    return pngBlob;
   } finally {
     globalThis.URL.revokeObjectURL(objectUrl);
   }
 }
 
-function errorDetails(error) {
-  return {
-    name: error?.name ?? "Error",
-    message: error?.message ?? String(error),
-  };
-}
-
-function mediaLocation(url) {
-  if (typeof url === "string" && /^data:/i.test(url)) return "base64-data-url";
-  try {
-    const parsedUrl = new URL(url);
-    return `${parsedUrl.origin}${parsedUrl.pathname}`;
-  } catch {
-    return "unparseable media URL";
+/**
+ * Pure client-side fetch. Works natively for Giphy, Tenor, Klipy, and data URLs
+ * since their CDNs send Access-Control-Allow-Origin: *.
+ */
+async function fetchMediaBlob(mediaUrl) {
+  const response = await fetch(mediaUrl, { mode: "cors" });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} while fetching media.`);
   }
+  const blob = await response.blob();
+  if (!blob.type.startsWith("image/")) {
+    throw new Error("Fetched resource is not a valid image.");
+  }
+  return blob;
 }
 
-function createClipboardLogger(item, mediaUrl, mimeType) {
-  const consoleApi = globalThis.console;
-  consoleApi?.groupCollapsed?.(
-    `%c📋 Clipboard debug: ${item.title || "media result"}`,
-    "color: #8b5cf6; font-weight: bold",
-  );
-  consoleApi?.info?.("Media source", {
-    url: mediaLocation(mediaUrl),
-    mimeType,
-    secureContext: globalThis.isSecureContext,
-    userAgent: globalThis.navigator?.userAgent ?? "unknown",
-  });
+export async function copyMediaToClipboard(item, options = {}) {
+  const { preferImageOverLink = true } = options;
+  const mediaUrl = item.imageUrl;
+  if (!mediaUrl) throw new Error("This result has no media URL to copy.");
 
-  return {
-    log(label, details) {
-      consoleApi?.info?.(`📋 ${label}`, details);
-    },
-    close() {
-      consoleApi?.groupEnd?.();
-    },
+  const mimeType = imageMimeType(mediaUrl, item.mimeType);
+  if (!mimeType) throw new Error("Unrecognizable image format.");
+
+  const clipboard = globalThis.navigator?.clipboard;
+  const ClipboardItemConstructor = globalThis.ClipboardItem;
+
+  if (typeof clipboard?.write !== "function" || typeof ClipboardItemConstructor !== "function") {
+    throw new Error("Async Clipboard API is not supported in this browser.");
+  }
+
+  const supports = (format) => {
+    if (typeof ClipboardItemConstructor.supports !== "function") return false;
+    try {
+      return ClipboardItemConstructor.supports(format);
+    } catch {
+      return false;
+    }
   };
+
+  // Start fetching & converting synchronously inside the click handler
+  const rawBlobPromise = fetchMediaBlob(mediaUrl);
+  const pngBlobPromise = rawBlobPromise.then((blob) =>
+    blob.type === "image/png" ? blob : convertBlobToPng(blob)
+  );
+
+  // Prevent unhandled promise rejection logs if a branch isn't used
+  rawBlobPromise.catch(() => {});
+  pngBlobPromise.catch(() => {});
+
+  const formats = {
+    "image/png": pngBlobPromise,
+  };
+
+  if (mimeType === "image/gif") {
+    if (supports("image/gif")) {
+      formats["image/gif"] = rawBlobPromise;
+    }
+    if (supports("web image/gif")) {
+      formats["web image/gif"] = rawBlobPromise;
+    }
+  }
+
+  const html = `<img src="${escapeHtml(mediaUrl)}" alt="${escapeHtml(item.title || "GIF")}">`;
+  formats["text/html"] = new Blob([html], { type: "text/html" });
+
+  if (!preferImageOverLink) {
+    formats["text/plain"] = new Blob([mediaUrl], { type: "text/plain" });
+  }
+
+  try {
+    // 1. Primary multi-format write (works in Chrome, Edge, Safari)
+    await clipboard.write([new ClipboardItemConstructor(formats)]);
+
+    const isAnimatedSupported = Boolean(formats["image/gif"] || formats["web image/gif"]);
+    return {
+      method: isAnimatedSupported ? "multi-format-animated" : "static-png-and-html",
+      mimeType: isAnimatedSupported ? "image/gif" : "image/png",
+      formats: Object.keys(formats),
+    };
+  } catch {
+    // 2. Fallback for Firefox (which prefers a single image/png entry)
+    try {
+      await clipboard.write([
+        new ClipboardItemConstructor({ "image/png": pngBlobPromise }),
+      ]);
+      return {
+        method: "static-png",
+        mimeType: "image/png",
+        formats: ["image/png"],
+      };
+    } catch {
+      // 3. Final CORS-blocked fallback: If a third-party host blocks fetch() completely,
+      // fall back to writing rich HTML + URL so the user still gets a working paste.
+      if (!/^data:/i.test(mediaUrl)) {
+        try {
+          await clipboard.write([
+            new ClipboardItemConstructor({
+              "text/html": new Blob([html], { type: "text/html" }),
+              "text/plain": new Blob([mediaUrl], { type: "text/plain" }),
+            }),
+          ]);
+          return {
+            method: "rich-html",
+            mimeType: "text/html",
+            formats: ["text/html", "text/plain"],
+          };
+        } catch (finalErr) {
+          throw new Error(
+            `Clipboard blocked (${finalErr.message}). Use right-click > Copy image instead.`,
+            { cause: finalErr }
+          );
+        }
+      }
+      throw new Error("Could not copy image to clipboard. Use right-click > Copy image instead.");
+    }
+  }
 }
 
 export async function copyAnimatedGifToClipboard(blob) {
   if (!blob || blob.type !== "image/gif") {
     throw new Error("The generated meme is not an animated GIF.");
   }
-
   const clipboard = globalThis.navigator?.clipboard;
   const ClipboardItemConstructor = globalThis.ClipboardItem;
-  if (typeof clipboard?.write !== "function" ||
-    typeof ClipboardItemConstructor !== "function") {
+  if (typeof clipboard?.write !== "function" || typeof ClipboardItemConstructor !== "function") {
     throw new Error("This browser does not support copying animated GIFs to the clipboard.");
   }
 
+  // Bundle static PNG alongside the GIF blob so pasting into Discord/Slack never fails
+  const pngPromise = convertBlobToPng(blob);
+  pngPromise.catch(() => {});
+
+  const formats = { "image/png": pngPromise };
+  if (ClipboardItemConstructor.supports?.("image/gif")) formats["image/gif"] = blob;
+  if (ClipboardItemConstructor.supports?.("web image/gif")) formats["web image/gif"] = blob;
+
   try {
-    await clipboard.write([
-      new ClipboardItemConstructor({ "image/gif": blob }),
-    ]);
-  } catch (cause) {
-    const detail = cause instanceof Error ? ` ${cause.message}` : "";
-    throw new Error(`This browser rejected animated GIF clipboard data.${detail}`, { cause });
+    await clipboard.write([new ClipboardItemConstructor(formats)]);
+  } catch {
+    // Fallback to pure PNG if browser rejects the GIF blob
+    await clipboard.write([new ClipboardItemConstructor({ "image/png": pngPromise })]);
   }
 }
 
@@ -157,202 +236,8 @@ export async function copyPngToClipboard(blob) {
   }
   const clipboard = globalThis.navigator?.clipboard;
   const ClipboardItemConstructor = globalThis.ClipboardItem;
-  if (typeof clipboard?.write !== "function" ||
-    typeof ClipboardItemConstructor !== "function") {
+  if (typeof clipboard?.write !== "function" || typeof ClipboardItemConstructor !== "function") {
     throw new Error("This browser does not support copying images to the clipboard.");
   }
-  try {
-    await clipboard.write([
-      new ClipboardItemConstructor({ "image/png": blob }),
-    ]);
-  } catch (cause) {
-    const detail = cause instanceof Error ? ` ${cause.message}` : "";
-    throw new Error(`This browser rejected PNG clipboard data.${detail}`, { cause });
-  }
-}
-
-export async function copyMediaToClipboard(item) {
-  const mediaUrl = item.imageUrl;
-  if (!mediaUrl) throw new Error("This result has no media URL to copy.");
-
-  const mimeType = imageMimeType(mediaUrl, item.mimeType);
-  if (!mimeType) throw new Error("This result does not have a recognizable image format.");
-
-  const clipboard = globalThis.navigator?.clipboard;
-  const ClipboardItemConstructor = globalThis.ClipboardItem;
-  const logger = createClipboardLogger(item, mediaUrl, mimeType);
-  if (!clipboard || typeof clipboard.write !== "function" ||
-    typeof ClipboardItemConstructor !== "function") {
-    logger.log("Async Clipboard API unavailable", {
-      hasClipboardWrite: typeof clipboard?.write === "function",
-      hasClipboardItem: typeof ClipboardItemConstructor === "function",
-    });
-    logger.close();
-    throw new Error("This browser does not expose the Clipboard API required for media copying.");
-  }
-
-  const errors = [];
-  let fetchError;
-  let imageBlob;
-  let staticPngBlob;
-  const getImageBlob = () => {
-    if (!imageBlob) {
-      imageBlob = fetch(mediaUrl)
-        .then(async (response) => {
-          if (!response.ok) throw new Error(`Media request returned HTTP ${response.status}.`);
-          const blob = await response.blob();
-          const blobType = blob.type?.split(";")[0].toLowerCase();
-          if (blobType && blobType !== mimeType) {
-            throw new Error(`Expected ${mimeType} but received ${blobType}.`);
-          }
-          if (!blobType?.startsWith("image/")) {
-            throw new Error("The result URL did not return a recognizable image.");
-          }
-          logger.log("Media fetched", {
-            byteLength: blob.size,
-            responseMimeType: blobType,
-          });
-          return blob;
-        })
-        .catch((error) => {
-          fetchError = error;
-          logger.log("Media fetch failed", errorDetails(error));
-          throw error;
-        });
-      imageBlob.catch(() => {});
-    }
-    return imageBlob;
-  };
-  const getStaticPngBlob = () => {
-    if (!staticPngBlob) {
-      staticPngBlob = getImageBlob().then((blob) => createStaticPng(blob, logger));
-    }
-    return staticPngBlob;
-  };
-
-  const supports = (format) => {
-    if (typeof ClipboardItemConstructor.supports !== "function") return "unknown";
-    try {
-      return ClipboardItemConstructor.supports(format);
-    } catch (error) {
-      logger.log(`Format support check failed: ${format}`, errorDetails(error));
-      return false;
-    }
-  };
-  const customMimeType = `web ${mimeType}`;
-  const customFormatSupport = supports(customMimeType);
-  const nativeFormatSupport = supports(mimeType);
-  const pngFormatSupport = supports("image/png");
-  const richHtmlSupport = supports("text/html");
-  logger.log("Clipboard format support", {
-    native: { format: mimeType, supported: nativeFormatSupport },
-    custom: { format: customMimeType, supported: customFormatSupport },
-    staticImageFallback: { format: "image/png", supported: pngFormatSupport },
-    richHtml: { format: "text/html", supported: richHtmlSupport },
-  });
-
-  const writeCandidate = async (label, formats, result) => {
-    try {
-      const clipboardItem = new ClipboardItemConstructor(formats);
-      await clipboard.write([clipboardItem]);
-      logger.log(`${label} accepted by browser`, {
-        formats: Object.keys(formats),
-        note: "Clipboard API acceptance does not verify that another app can paste this representation.",
-      });
-      return result;
-    } catch (error) {
-      errors.push(error);
-      logger.log(`${label} rejected`, errorDetails(error));
-      return null;
-    }
-  };
-
-  try {
-    if (mimeType === "image/gif") {
-      const formats = {
-        "text/plain": new Blob([mediaUrl], { type: "text/plain" }),
-      };
-      if (richHtmlSupport !== false) {
-        const html = `<img src="${escapeHtml(mediaUrl)}" alt="${escapeHtml(item.title || "GIF")}">`;
-        formats["text/html"] = new Blob([html], { type: "text/html" });
-      }
-      if (nativeFormatSupport === true) {
-        formats[mimeType] = getImageBlob();
-      }
-      if (customFormatSupport === true) {
-        formats[customMimeType] = getImageBlob();
-      }
-
-      if (Object.keys(formats).length > 0) {
-        const multiFormatResult = await writeCandidate(
-          "GIF multi-format clipboard write",
-          formats,
-          { method: "multi-format", mimeType, formats: Object.keys(formats) },
-        );
-        if (multiFormatResult) return multiFormatResult;
-      }
-    }
-
-    if (mimeType === "image/gif" && richHtmlSupport !== false) {
-      const html = `<img src="${escapeHtml(mediaUrl)}" alt="${escapeHtml(item.title || "GIF")}">`;
-      const richHtmlResult = await writeCandidate(
-        "GIF rich HTML clipboard write",
-        {
-          "text/html": new Blob([html], { type: "text/html" }),
-          "text/plain": new Blob([mediaUrl], { type: "text/plain" }),
-        },
-        { method: "rich-html", mimeType },
-      );
-      if (richHtmlResult) return richHtmlResult;
-    }
-
-    const writeStaticPng = async () => {
-      if (mimeType !== "image/gif" || pngFormatSupport === false) return null;
-      return writeCandidate(
-        "Static PNG image/png write",
-        { "image/png": getStaticPngBlob() },
-        { method: "static-png", mimeType: "image/png" },
-      );
-    };
-
-    if (mimeType === "image/gif" && nativeFormatSupport === false) {
-      const pngResult = await writeStaticPng();
-      if (pngResult) return pngResult;
-    }
-
-    const nativeResult = await writeCandidate(
-      `Native ${mimeType} Blob write`,
-      { [mimeType]: getImageBlob() },
-      { method: "native", mimeType },
-    );
-    if (nativeResult) return nativeResult;
-
-    if (mimeType === "image/gif" && nativeFormatSupport !== false) {
-      const pngResult = await writeStaticPng();
-      if (pngResult) return pngResult;
-    }
-
-    if (customFormatSupport === true) {
-      const customResult = await writeCandidate(
-        `Browser custom ${customMimeType} write`,
-        { [customMimeType]: getImageBlob() },
-        { method: "web-custom", mimeType },
-      );
-      if (customResult) return customResult;
-    }
-
-    if (fetchError) {
-      throw new Error(
-        `Could not fetch the media bytes: ${errorDetails(fetchError).message}`,
-        { cause: fetchError },
-      );
-    }
-    const lastError = errors.at(-1);
-    throw new Error(
-      `This browser rejected ${mimeType} clipboard data${lastError ? `: ${lastError.message}` : "."} Use the image's browser context menu (right-click > Copy image) instead.`,
-      { cause: new AggregateError(errors, "Clipboard strategies failed.") },
-    );
-  } finally {
-    logger.close();
-  }
+  await clipboard.write([new ClipboardItemConstructor({ "image/png": blob })]);
 }

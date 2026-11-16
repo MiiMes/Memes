@@ -87,20 +87,18 @@ export function MediaCard({
   async function copyResult() {
     showCopyFeedback({ tone: "pending", message: "Copying…" });
     try {
-      const copyFormat = await copyMediaToClipboard(item);
-      const mediaName = item.kind === "sticker" ? "Sticker" : "GIF";
+      // preferImageOverLink: true ensures Discord/Slack paste the image instead of a text URL
+      const copyFormat = await copyMediaToClipboard(item, { preferImageOverLink: true });
+      
       const copyMessages = {
-        "rich-html": "GIF copied as rich HTML; target app support varies.",
-        "static-png": "GIF animation could not be copied; its first frame was copied as a static PNG.",
-        native: `${mediaName} bytes copied (${copyFormat.mimeType}); paste to verify.`,
-        "web-custom": `${mediaName} browser-specific data was accepted; Discord may ignore it.`,
+        "multi-format-animated": "GIF copied! Paste into any chat or editor.",
+        "static-png-and-html": "Copied! (Pasted as static PNG in apps that block GIF blobs).",
+        "static-png": "Copied first frame as PNG (browser limits animated clipboard).",
       };
-      const message = copyFormat.method === "multi-format"
-        ? `Clipboard accepted ${copyFormat.formats.join(", ")}; the target app chooses which representation to paste.`
-        : copyMessages[copyFormat.method] ?? `${mediaName} copy accepted by the browser.`;
+
       showCopyFeedback({
-        tone: copyFormat.method === "web-custom" ? "error" : "success",
-        message,
+        tone: "success",
+        message: copyMessages[copyFormat.method] ?? "Copied to clipboard!",
       });
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
