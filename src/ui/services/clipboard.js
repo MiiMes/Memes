@@ -14,7 +14,7 @@ function imageMimeType(url, knownMimeType) {
     if (commaIndex < 0) return "";
     const [mimeType, ...parameters] = url.slice(5, commaIndex).split(";");
     const normalizedMimeType = mimeType.toLowerCase();
-    return parameters.some((p) => p.toLowerCase() === "base64") &&
+    return parameters.some((parameter) => parameter.toLowerCase() === "base64") &&
       SUPPORTED_IMAGE_MIME_TYPES.has(normalizedMimeType)
       ? normalizedMimeType
       : "";
@@ -42,13 +42,9 @@ function escapeHtml(value) {
   })[character]);
 }
 
-/**
- * Decodes an image blob and draws its first frame onto a canvas to export a static PNG.
- */
-async function convertBlobToPng(blob) {
+async function createStaticPng(blob) {
   const image = new globalThis.Image();
   const objectUrl = globalThis.URL.createObjectURL(blob);
-
   try {
     image.src = objectUrl;
     if (typeof image.decode === "function") {
@@ -56,28 +52,27 @@ async function convertBlobToPng(blob) {
     } else {
       await new Promise((resolve, reject) => {
         image.onload = resolve;
-        image.onerror = () => reject(new Error("Image frame could not be decoded."));
+        image.onerror = () => reject(new Error("The image could not be decoded."));
       });
     }
 
     const width = image.naturalWidth;
     const height = image.naturalHeight;
     if (!width || !height || width * height > MAX_STATIC_PNG_PIXELS) {
-      throw new Error("Image dimensions exceed safe clipboard limits.");
+      throw new Error("The image is too large to safely copy as a static PNG.");
     }
 
     const canvas = globalThis.document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
     const context = canvas.getContext("2d");
-    if (!context) throw new Error("Canvas 2D context unavailable.");
-
+    if (!context) throw new Error("This browser cannot create a PNG clipboard image.");
     context.drawImage(image, 0, 0, width, height);
 
     return await new Promise((resolve, reject) => {
       canvas.toBlob((pngBlob) => {
         if (pngBlob) resolve(pngBlob);
-        else reject(new Error("Canvas failed to export PNG blob."));
+        else reject(new Error("The browser could not export the frame as PNG."));
       }, "image/png");
     });
   } finally {
@@ -85,122 +80,74 @@ async function convertBlobToPng(blob) {
   }
 }
 
-/**
- * Pure client-side fetch. Works natively for Giphy, Tenor, Klipy, and data URLs
- * since their CDNs send Access-Control-Allow-Origin: *.
- */
-async function fetchMediaBlob(mediaUrl) {
-  const response = await fetch(mediaUrl, { mode: "cors" });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status} while fetching media.`);
-  }
-  const blob = await response.blob();
-  if (!blob.type.startsWith("image/")) {
-    throw new Error("Fetched resource is not a valid image.");
-  }
-  return blob;
-}
-
-export async function copyMediaToClipboard(item, options = {}) {
-  const { preferImageOverLink = true } = options;
+export async function copyMediaToClipboard(item) {
   const mediaUrl = item.imageUrl;
   if (!mediaUrl) throw new Error("This result has no media URL to copy.");
 
   const mimeType = imageMimeType(mediaUrl, item.mimeType);
-  if (!mimeType) throw new Error("Unrecognizable image format.");
+  if (!mimeType) throw new Error("This result does not have a recognizable image format.");
 
   const clipboard = globalThis.navigator?.clipboard;
   const ClipboardItemConstructor = globalThis.ClipboardItem;
 
+  // 1. For hosted GIFs (Giphy, Tenor, Klipy, etc.):
+  // Omit `image/png` so Discord, Slack, Gmail, and Notion embed/unfurl the animated GIF
+  // instead of grabbing a static first-frame PNG.
+  if (mimeType === "image/gif" && !/^data:/i.test(mediaUrl)) {
+    const html = `<img src="${escapeHtml(mediaUrl)}" alt="${escapeHtml(item.title || "GIF")}">`;
+
+    if (typeof clipboard?.write === "function" && typeof ClipboardItemConstructor === "function") {
+      try {
+        await clipboard.write([
+          new ClipboardItemConstructor({
+            "text/html": new Blob([html], { type: "text/html" }),
+            "text/plain": new Blob([mediaUrl], { type: "text/plain" }),
+          }),
+        ]);
+        return { method: "animated-embed", mimeType: "image/gif" };
+      } catch {
+        // Fall through to plain-text URL copy (works in Firefox even with strict clipboard settings)
+      }
+    }
+
+    if (typeof clipboard?.writeText === "function") {
+      await clipboard.writeText(mediaUrl);
+      return { method: "url-only", mimeType: "text/plain" };
+    }
+
+    throw new Error("This browser does not allow clipboard access.");
+  }
+
+  // 2. For static stickers/images (PNG, JPEG, WebP) or base64 data URLs:
+  // Copy actual image bytes as `image/png` so they paste directly as image attachments.
   if (typeof clipboard?.write !== "function" || typeof ClipboardItemConstructor !== "function") {
-    throw new Error("Async Clipboard API is not supported in this browser.");
+    throw new Error("This browser does not support copying image data to the clipboard.");
   }
 
-  const supports = (format) => {
-    if (typeof ClipboardItemConstructor.supports !== "function") return false;
-    try {
-      return ClipboardItemConstructor.supports(format);
-    } catch {
-      return false;
-    }
-  };
+  const pngPromise = fetch(mediaUrl, { mode: "cors" })
+    .then(async (response) => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.blob();
+    })
+    .then((blob) => (blob.type === "image/png" ? blob : createStaticPng(blob)));
 
-  // Start fetching & converting synchronously inside the click handler
-  const rawBlobPromise = fetchMediaBlob(mediaUrl);
-  const pngBlobPromise = rawBlobPromise.then((blob) =>
-    blob.type === "image/png" ? blob : convertBlobToPng(blob)
-  );
-
-  // Prevent unhandled promise rejection logs if a branch isn't used
-  rawBlobPromise.catch(() => {});
-  pngBlobPromise.catch(() => {});
-
-  const formats = {
-    "image/png": pngBlobPromise,
-  };
-
-  if (mimeType === "image/gif") {
-    if (supports("image/gif")) {
-      formats["image/gif"] = rawBlobPromise;
-    }
-    if (supports("web image/gif")) {
-      formats["web image/gif"] = rawBlobPromise;
-    }
-  }
-
-  const html = `<img src="${escapeHtml(mediaUrl)}" alt="${escapeHtml(item.title || "GIF")}">`;
-  formats["text/html"] = new Blob([html], { type: "text/html" });
-
-  if (!preferImageOverLink) {
-    formats["text/plain"] = new Blob([mediaUrl], { type: "text/plain" });
-  }
+  pngPromise.catch(() => {});
 
   try {
-    // 1. Primary multi-format write (works in Chrome, Edge, Safari)
-    await clipboard.write([new ClipboardItemConstructor(formats)]);
-
-    const isAnimatedSupported = Boolean(formats["image/gif"] || formats["web image/gif"]);
-    return {
-      method: isAnimatedSupported ? "multi-format-animated" : "static-png-and-html",
-      mimeType: isAnimatedSupported ? "image/gif" : "image/png",
-      formats: Object.keys(formats),
-    };
-  } catch {
-    // 2. Fallback for Firefox (which prefers a single image/png entry)
-    try {
-      await clipboard.write([
-        new ClipboardItemConstructor({ "image/png": pngBlobPromise }),
-      ]);
-      return {
-        method: "static-png",
-        mimeType: "image/png",
-        formats: ["image/png"],
-      };
-    } catch {
-      // 3. Final CORS-blocked fallback: If a third-party host blocks fetch() completely,
-      // fall back to writing rich HTML + URL so the user still gets a working paste.
-      if (!/^data:/i.test(mediaUrl)) {
-        try {
-          await clipboard.write([
-            new ClipboardItemConstructor({
-              "text/html": new Blob([html], { type: "text/html" }),
-              "text/plain": new Blob([mediaUrl], { type: "text/plain" }),
-            }),
-          ]);
-          return {
-            method: "rich-html",
-            mimeType: "text/html",
-            formats: ["text/html", "text/plain"],
-          };
-        } catch (finalErr) {
-          throw new Error(
-            `Clipboard blocked (${finalErr.message}). Use right-click > Copy image instead.`,
-            { cause: finalErr }
-          );
-        }
-      }
-      throw new Error("Could not copy image to clipboard. Use right-click > Copy image instead.");
+    await clipboard.write([
+      new ClipboardItemConstructor({ "image/png": pngPromise }),
+    ]);
+    return { method: "static-png", mimeType: "image/png" };
+  } catch (cause) {
+    // Fallback to URL if a third-party image host blocks CORS
+    if (!/^data:/i.test(mediaUrl) && typeof clipboard.writeText === "function") {
+      await clipboard.writeText(mediaUrl);
+      return { method: "url-only", mimeType: "text/plain" };
     }
+    throw new Error(
+      "Could not copy image bytes. Use right-click > Copy image instead.",
+      { cause },
+    );
   }
 }
 
@@ -214,20 +161,21 @@ export async function copyAnimatedGifToClipboard(blob) {
     throw new Error("This browser does not support copying animated GIFs to the clipboard.");
   }
 
-  // Bundle static PNG alongside the GIF blob so pasting into Discord/Slack never fails
-  const pngPromise = convertBlobToPng(blob);
-  pngPromise.catch(() => {});
-
-  const formats = { "image/png": pngPromise };
+  const formats = {};
   if (ClipboardItemConstructor.supports?.("image/gif")) formats["image/gif"] = blob;
   if (ClipboardItemConstructor.supports?.("web image/gif")) formats["web image/gif"] = blob;
 
-  try {
-    await clipboard.write([new ClipboardItemConstructor(formats)]);
-  } catch {
-    // Fallback to pure PNG if browser rejects the GIF blob
-    await clipboard.write([new ClipboardItemConstructor({ "image/png": pngPromise })]);
+  if (Object.keys(formats).length > 0) {
+    try {
+      await clipboard.write([new ClipboardItemConstructor(formats)]);
+      return;
+    } catch {
+      // Fall through to static PNG fallback below
+    }
   }
+
+  const pngBlob = await createStaticPng(blob);
+  await clipboard.write([new ClipboardItemConstructor({ "image/png": pngBlob })]);
 }
 
 export async function copyPngToClipboard(blob) {

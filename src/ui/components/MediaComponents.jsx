@@ -87,18 +87,17 @@ export function MediaCard({
   async function copyResult() {
     showCopyFeedback({ tone: "pending", message: "Copying…" });
     try {
-      // preferImageOverLink: true ensures Discord/Slack paste the image instead of a text URL
-      const copyFormat = await copyMediaToClipboard(item, { preferImageOverLink: true });
-      
+      const copyFormat = await copyMediaToClipboard(item);
+      const mediaName = item.kind === "sticker" ? "Sticker" : "GIF";
       const copyMessages = {
-        "multi-format-animated": "GIF copied! Paste into any chat or editor.",
-        "static-png-and-html": "Copied! (Pasted as static PNG in apps that block GIF blobs).",
-        "static-png": "Copied first frame as PNG (browser limits animated clipboard).",
+        "animated-embed": "GIF copied! Paste in Discord, Slack, or email.",
+        "url-only": "GIF link copied! Paste to auto-embed.",
+        "static-png": `${mediaName} copied as image!`,
       };
 
       showCopyFeedback({
         tone: "success",
-        message: copyMessages[copyFormat.method] ?? "Copied to clipboard!",
+        message: copyMessages[copyFormat.method] ?? `${mediaName} copied!`,
       });
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
