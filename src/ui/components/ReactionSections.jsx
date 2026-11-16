@@ -132,15 +132,17 @@ export function ReactionTile({
     >
       <span className={`reaction-tile-art hue-${index % 6}`}>
         {imageUrl ? (
-          <img
-            src={imageUrl}
-            alt=""
-            loading="lazy"
-            onError={() => {
-              if (categoryPreview && !categoryPreviewFailed) setCategoryPreviewFailed(true);
-              else setSearchPreviewFailed(true);
-            }}
-          />
+          <meta charSet="utf-8">
+            <img
+              src={imageUrl}
+              alt=""
+              loading="lazy"
+              onError={() => {
+                if (categoryPreview && !categoryPreviewFailed) setCategoryPreviewFailed(true);
+                else setSearchPreviewFailed(true);
+              }}
+            />
+          </meta>
         ) : (
           <span aria-hidden="true">{["✦", "☺", "♥", "✳", "☁", "✧"][index % 6]}</span>
         )}
